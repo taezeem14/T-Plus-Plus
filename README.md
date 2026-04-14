@@ -10,6 +10,12 @@
 
 T++ is a next-generation language platform that lets developers write expressive, natural syntax while keeping deterministic runtime behavior, modern tooling, and production CI discipline.
 
+Download from PyPI:
+
+```bash
+pip install tpp-language
+```
+
 ## Why T++
 
 - Natural language syntax that remains readable to humans and executable by machines.
