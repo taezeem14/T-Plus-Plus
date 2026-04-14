@@ -61,6 +61,15 @@ def _print_error(message: str) -> None:
     print(_paint("[error]", CliStyle.RED), message)
 
 
+def _print_runtime_banner() -> None:
+    divider = _paint("-" * 64, CliStyle.DIM)
+    print(divider)
+    print(_paint(f"T++ Runtime v{__version__}", CliStyle.BOLD))
+    print("© Muhammad Taezeem Tariq Matta")
+    print("Source: https://github.com/taezeem14/T-Plus-Plus")
+    print(divider)
+
+
 def _load_config_file() -> dict[str, Any]:
     path = Path.cwd() / CONFIG_FILE
     if not path.exists():
@@ -185,13 +194,16 @@ def _run_source_text(engine: RuntimeEngine, source: str, *, repl_mode: bool = Fa
     return 0
 
 
-def _run_file(engine: RuntimeEngine, file_path: str) -> int:
+def _run_file(engine: RuntimeEngine, file_path: str, *, show_banner: bool = True) -> int:
     path = Path(file_path)
     try:
         source = path.read_text(encoding="utf-8")
     except OSError as exc:
         _print_error(f"Could not read file '{path}': {exc}")
         return 1
+
+    if show_banner and path.suffix.lower() == ".tpp":
+        _print_runtime_banner()
 
     code = _run_source_text(engine, source)
     if code == 0:
@@ -568,6 +580,7 @@ def _build_modern_parser() -> argparse.ArgumentParser:
 
     run_parser = sub.add_parser("run", parents=[common], help="Run a T++ file")
     run_parser.add_argument("file", help="T++ source file")
+    run_parser.add_argument("--no-banner", action="store_true", help="Disable runtime credit banner")
 
     repl_parser = sub.add_parser("repl", parents=[common], help="Start interactive shell")
     repl_parser.set_defaults(command="repl")
@@ -616,7 +629,7 @@ def _run_modern_cli(argv: list[str], config: dict[str, Any]) -> int:
         except Exception as exc:
             _print_error(render_error(exc, debug_trace=getattr(args, "debug_trace", False)))
             return 1
-        return _run_file(engine, args.file)
+        return _run_file(engine, args.file, show_banner=not args.no_banner)
 
     if args.command == "repl":
         try:
@@ -661,6 +674,7 @@ def _build_legacy_parser() -> argparse.ArgumentParser:
     parser.add_argument("--profile", action="store_true", help="Show execution profiling summary")
     parser.add_argument("--strict-semantic-resolution", action="store_true", help="Enable strict variable resolution")
     parser.add_argument("--no-python-bridge", action="store_true", help="Disable Python bridge imports")
+    parser.add_argument("--no-banner", action="store_true", help="Disable runtime credit banner")
     parser.add_argument("--doctor", action="store_true", help="Run environment and installation diagnostics")
     return parser
 
@@ -689,7 +703,7 @@ def _run_legacy_cli(argv: list[str], config: dict[str, Any]) -> int:
         return 1
 
     if args.file:
-        return _run_file(engine, args.file)
+        return _run_file(engine, args.file, show_banner=not args.no_banner)
 
     if not sys.stdin.isatty():
         return _run_pipe(engine)
