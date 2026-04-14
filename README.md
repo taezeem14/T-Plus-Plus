@@ -2,7 +2,6 @@
 
 > Human-first programming, engineered for real-world software.
 
-[![PyPI version](https://img.shields.io/pypi/v/tpp-language?style=for-the-badge)](https://pypi.org/project/tpp-language/)
 [![Python](https://img.shields.io/pypi/pyversions/tpp-language?style=for-the-badge)](https://pypi.org/project/tpp-language/)
 [![CI](https://img.shields.io/github/actions/workflow/status/taezeem14/T-Plus-Plus/ci.yml?branch=main&style=for-the-badge&label=CI)](https://github.com/taezeem14/T-Plus-Plus/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/actions/workflow/status/taezeem14/T-Plus-Plus/release.yml?style=for-the-badge&label=Release)](https://github.com/taezeem14/T-Plus-Plus/actions/workflows/release.yml)
