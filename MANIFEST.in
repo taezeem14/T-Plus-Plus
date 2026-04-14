@@ -1,0 +1,7 @@
+include README.md
+include pyproject.toml
+include .tppconfig.example
+recursive-include tpp/api/webide *.html
+recursive-include docs *.md
+recursive-include examples *.tpp *.json
+recursive-include tests *.tpp *.py

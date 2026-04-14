@@ -1,0 +1,109 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      publish_to_pypi:
+        description: "Publish to PyPI (requires trusted publishing setup)"
+        type: boolean
+        default: false
+        required: false
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  release:
+    name: Build and Release
+    runs-on: ubuntu-latest
+
+    env:
+      PYTHONUTF8: "1"
+      NO_COLOR: "1"
+
+    steps:
+      # Fetch full history so changelog generation can diff previous tags.
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Standardized build interpreter for release packaging.
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      # Build tooling for sdist/wheel generation and integrity checks.
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build twine
+
+      # Produce distributable artifacts for PyPI and GitHub release assets.
+      - name: Build wheel and sdist
+        run: python -m build
+
+      # Verify package metadata and archives before publishing.
+      - name: Validate build artifacts
+        run: python -m twine check dist/*
+
+      # Install the built wheel to ensure release artifacts are executable.
+      - name: Smoke test built package
+        run: |
+          python -m pip install dist/*.whl
+          tpp --version
+          tpp run examples/hello.tpp
+          tpp test tests/regression.tpp
+          python scripts/ci_validate.py
+
+      # Generate a changelog section from git commits between tags.
+      - name: Generate changelog
+        run: |
+          TAG_NAME="${GITHUB_REF_NAME}"
+          PREV_TAG="$(git describe --tags --abbrev=0 "${TAG_NAME}^" 2>/dev/null || true)"
+          {
+            echo "# ${TAG_NAME}"
+            echo
+            if [ -n "${PREV_TAG}" ]; then
+              echo "Changes since ${PREV_TAG}:"
+              echo
+              git log --pretty=format:'- %s (%h)' "${PREV_TAG}..${TAG_NAME}"
+            else
+              echo "Changes in this release:"
+              echo
+              git log --pretty=format:'- %s (%h)' -n 40
+            fi
+          } > RELEASE_NOTES.md
+
+      # Upload release payload for troubleshooting and archival.
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-artifacts-${{ github.ref_name }}
+          path: |
+            dist/*
+            RELEASE_NOTES.md
+
+      # Create/update GitHub release and attach built distributions.
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: RELEASE_NOTES.md
+          files: dist/*
+
+      # Optional PyPI publish path. Enable with workflow_dispatch input
+      # or repository variable TPP_PUBLISH_PYPI=true on tag pushes.
+      - name: Publish to PyPI (optional)
+        if: |
+          (github.event_name == 'workflow_dispatch' && inputs.publish_to_pypi) ||
+          (github.event_name == 'push' && vars.TPP_PUBLISH_PYPI == 'true')
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/

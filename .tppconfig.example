@@ -1,0 +1,8 @@
+{
+  "parser_mode": "fuzzy",
+  "plugins": [
+    "sample_plugin.json"
+  ],
+  "strict_semantic_resolution": false,
+  "no_python_bridge": false
+}

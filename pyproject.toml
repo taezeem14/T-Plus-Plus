@@ -1,0 +1,64 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tpp-language"
+version = "3.1.0"
+description = "T++: Human-first natural language programming platform"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+  { name = "T++ Contributors" }
+]
+keywords = ["programming-language", "dsl", "cli", "language-runtime", "natural-language"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Interpreters",
+  "Topic :: Software Development :: Compilers",
+  "Topic :: Utilities"
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+  "build>=1.2.1",
+  "pre-commit>=3.7.1",
+  "pytest>=8.2.0",
+  "ruff>=0.6.9",
+  "twine>=5.1.1"
+]
+
+[project.urls]
+Homepage = "https://github.com/taezeem14/T-Plus-Plus"
+Repository = "https://github.com/taezeem14/T-Plus-Plus"
+
+[project.scripts]
+tpp = "tpp.cli.main:main"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["tpp*"]
+
+[tool.setuptools.package-data]
+tpp = ["api/webide/index.html"]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E9", "F63", "F7", "F82"]

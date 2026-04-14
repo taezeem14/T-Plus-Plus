@@ -1,0 +1,82 @@
+name: Continuous Validation
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate (${{ matrix.os }}, py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux coverage across all supported Python versions.
+          - os: ubuntu-latest
+            python-version: "3.10"
+          - os: ubuntu-latest
+            python-version: "3.11"
+          - os: ubuntu-latest
+            python-version: "3.12"
+          - os: ubuntu-latest
+            python-version: "3.13"
+          # Windows smoke coverage for cross-platform behavior.
+          - os: windows-latest
+            python-version: "3.12"
+
+    env:
+      PYTHONUTF8: "1"
+      NO_COLOR: "1"
+
+    steps:
+      # Pull the repository onto the runner.
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      # Install Python and enable pip caching based on project metadata.
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      # Keep packaging tooling current.
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip
+
+      # Install T++ exactly how users install it, plus CI tooling.
+      - name: Install package and tooling
+        run: |
+          python -m pip install .
+          python -m pip install pytest ruff
+
+      # Sanity-check syntax/importability for packaged modules.
+      - name: Python compile check
+        run: python -m compileall -q tpp
+
+      # Linting is recommended and helps catch regressions early.
+      - name: Lint Python sources
+        run: ruff check tpp tests scripts
+
+      # Execute end-to-end CLI checks required by the platform contract.
+      - name: CLI validation suite
+        run: python scripts/ci_validate.py
+
+      # Run Python-level CLI integration tests.
+      - name: Integration tests
+        run: pytest -q tests/test_cli_integration.py
+
+      # Preserve command logs and diagnostics from the CI script.
+      - name: Upload CI artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-artifacts-${{ matrix.os }}-py${{ matrix.python-version }}
+          path: .ci-artifacts
+          if-no-files-found: ignore
