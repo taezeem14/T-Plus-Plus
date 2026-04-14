@@ -10,6 +10,8 @@
 
 T++ is a next-generation language platform that lets developers write expressive, natural syntax while keeping deterministic runtime behavior, modern tooling, and production CI discipline.
 
+Current stable release: `3.1.3`
+
 Download from PyPI:
 
 ```bash
