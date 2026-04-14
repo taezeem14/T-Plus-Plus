@@ -131,29 +131,74 @@ API payload:
 - Enhanced debugging and profiling introspection.
 - Cloud-hosted collaborative web IDE experience.
 
-## Documentation
+## Validation and CI
 
-- Language guide: `docs/language-guide.md`
-- Plugin guide: `docs/plugin-guide.md`
-- Web IDE guide: `docs/web-ide.md`
-- DevOps and release automation: `docs/devops.md`
+This repository includes production-ready GitHub Actions workflows:
 
-## Build With T++
+- `.github/workflows/ci.yml`: continuous validation for push and pull request
+- `.github/workflows/release.yml`: tag-based release build + GitHub Release + optional PyPI publish
 
-If you want code that reads closer to intent than syntax, start with one file:
+CI validates:
 
-```bash
-tpp run examples/hello.tpp
+- package installation (`pip install .`)
+- compile checks (`python -m compileall -q tpp`)
+- linting (`ruff check tpp tests scripts`)
+- required CLI contract (`tpp --version`, `run`, `test`, `repl`, `plugin install/list`)
+- `tpp doctor` diagnostics
+
+## Release Process
+
+Create a semantic version tag:
+
+```powershell
+git tag v3.1.1
+git push origin v3.1.1
 ```
 
-T++ is built to feel approachable on day one and scalable by day one hundred.
+The release workflow will:
 
----
+- build wheel + sdist
+- run `twine check`
+- run smoke tests against built wheel
+- generate release notes from git history
+- publish a GitHub release with artifacts
 
-## Source and Copyright
+Optional PyPI publish:
 
-© Muhammad Taezeem Tariq Matta (2026)
+- run release workflow manually with `publish_to_pypi=true`, or
+- set repository variable `TPP_PUBLISH_PYPI=true` for tag pushes
 
-T++ is open source and available on GitHub: [github.com/taezeem14/T-Plus-Plus](https://github.com/taezeem14/T-Plus-Plus)
+## Developer Workflow
 
-If this project helps you, consider starring the repository.
+```powershell
+python -m pip install -e .[dev]
+pre-commit install
+python scripts/ci_validate.py
+pytest -q tests/test_cli_integration.py
+```
+
+## Security Notes
+
+- Python module bridging is allow-listed
+- system stdlib file operations are workspace-sandboxed
+- plugin Python hooks are namespace-restricted
+
+## Project Layout
+
+- tpp/
+- examples/
+- tests/
+- docs/
+- README.md
+- pyproject.toml
+
+## Publish Readiness
+
+This codebase is structured for GitHub publishing and pip installation.
+
+For documentation details:
+
+- docs/language-guide.md
+- docs/plugin-guide.md
+- docs/web-ide.md
+- docs/devops.md
