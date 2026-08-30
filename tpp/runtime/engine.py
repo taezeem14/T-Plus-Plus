@@ -1,12 +1,11 @@
 from __future__ import annotations
 
+import os
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
-
-from tpp import __version__
 from tpp.core.ast_nodes import (
     AddToStmt,
     AskStmt,
@@ -22,16 +21,21 @@ from tpp.core.ast_nodes import (
     ExpectEqualStmt,
     ExpectRangeStmt,
     ExpectTypeStmt,
+    ExportStmt,
     ExprStmt,
     ForEachStmt,
     FunctionDefStmt,
+    HandleClause,
     IfStmt,
     ImportFromStmt,
     ImportModuleStmt,
     LetStmt,
+    MatchStmt,
+    MatchWhenClause,
     OnButtonClickStmt,
     PassStmt,
     Program,
+    RaiseStmt,
     RegisterKeywordStmt,
     RememberStmt,
     RemoveFromStmt,
@@ -43,17 +47,29 @@ from tpp.core.ast_nodes import (
     SmartAssignStmt,
     TestStmt,
     TestSuiteStmt,
+    TryStmt,
+    UseFromModuleStmt,
+    UseModuleStmt,
     WhileStmt,
 )
-from tpp.core.constants import ALLOWED_PYTHON_MODULES, CORE_STATEMENT_STARTERS
+from tpp.core.constants import ALLOWED_PYTHON_MODULES, CORE_STATEMENT_STARTERS, VERSION
 from tpp.core.errors import (
     BreakSignal,
     ContinueSignal,
+    ExecutionBudgetExceeded,
+    IndexTppError,
+    MathTppError,
+    ModuleNotFoundTppError,
     ReturnSignal,
     RuntimeTppError,
     SecurityTppError,
+    TppCallFrame,
     TppError,
+    TypeTppError,
+    UserRaisedSignal,
 )
+from tpp.core.modules import ModuleRecord, ModuleRegistry
+from tpp.core.types import check_type_or_raise
 from tpp.core.utils import is_identifier, split_key_value, split_natural_args, split_top_level, split_top_level_once
 from tpp.gui.framework import GuiRuntime
 from tpp.parser import Optimizer, Parser, ParserConfig, SemanticAnalyzer, SemanticConfig
@@ -72,8 +88,12 @@ class EngineConfig:
     optimize: bool = True
     profiling: bool = False
     strict_semantic_resolution: bool = False
+    enforce_types: bool = False
+    strict_types: bool = False
     allow_python_bridge: bool = True
     sandbox_base_dir: Optional[Path] = None
+    max_execution_steps: Optional[int] = None
+    max_execution_time_sec: Optional[float] = None
 
 
 @dataclass
@@ -91,7 +111,10 @@ class RuntimeEngine:
 
         self.global_scope = Scope()
         self.parser_semantic = SemanticAnalyzer(
-            SemanticConfig(strict_variable_resolution=self.config.strict_semantic_resolution)
+            SemanticConfig(
+                strict_variable_resolution=self.config.strict_semantic_resolution,
+                strict_types=self.config.strict_types,
+            )
         )
         self.optimizer = Optimizer()
         self.profiler = RuntimeProfiler(enabled=self.config.profiling)
@@ -100,9 +123,31 @@ class RuntimeEngine:
         self.gui = GuiRuntime()
 
         self.native_stdlib = create_native_stdlib_registry(self.base_dir)
+        self.module_registry = ModuleRegistry(self.base_dir)
         self.program_cache: dict[tuple[str, str, bool, int], Program] = {}
 
         self.evaluator = ExpressionEvaluator(self)
+        self.call_stack: list[TppCallFrame] = []
+        self.step_count: int = 0
+        self.execution_start_time: float = time.perf_counter()
+        self.current_file_path: Optional[str] = None
+
+    def _check_budget(self, line: Optional[int] = None) -> None:
+        self.step_count += 1
+        if self.config.max_execution_steps and self.step_count > self.config.max_execution_steps:
+            raise ExecutionBudgetExceeded(
+                f"Execution instruction limit of {self.config.max_execution_steps} steps exceeded.",
+                line=line,
+                call_stack=list(self.call_stack),
+            )
+        if self.config.max_execution_time_sec and (self.step_count % 100 == 0):
+            elapsed = time.perf_counter() - self.execution_start_time
+            if elapsed > self.config.max_execution_time_sec:
+                raise ExecutionBudgetExceeded(
+                    f"Execution time limit of {self.config.max_execution_time_sec}s exceeded ({elapsed:.2f}s elapsed).",
+                    line=line,
+                    call_stack=list(self.call_stack),
+                )
 
     def _plugin_signature(self) -> int:
         return (
@@ -122,7 +167,7 @@ class RuntimeEngine:
         self.plugin_manager.load_file(path)
         self.program_cache.clear()
 
-    def parse_source(self, source: str, *, repl_mode: bool = False) -> Program:
+    def parse_source(self, source: str, *, repl_mode: bool = False, file_path: Optional[str] = None) -> Program:
         cache_key = (source, self.config.parser_mode, repl_mode, self._plugin_signature())
         cached = self.program_cache.get(cache_key)
         if cached is not None:
@@ -134,6 +179,7 @@ class RuntimeEngine:
             config=ParserConfig(mode=self.config.parser_mode, repl_mode=repl_mode),
             plugin_rewrites=rewrites,
             plugin_keywords=keywords,
+            file_path=file_path,
         )
         program = parser.parse()
         program = self.plugin_manager.apply_ast_transforms(program)
@@ -148,8 +194,11 @@ class RuntimeEngine:
         self.program_cache[cache_key] = program
         return program
 
-    def run_source(self, source: str, *, repl_mode: bool = False) -> None:
-        program = self.parse_source(source, repl_mode=repl_mode)
+    def run_source(self, source: str, *, repl_mode: bool = False, file_path: Optional[str] = None) -> None:
+        self.step_count = 0
+        self.execution_start_time = time.perf_counter()
+        self.current_file_path = file_path
+        program = self.parse_source(source, repl_mode=repl_mode, file_path=file_path)
         self.execute_program(program)
 
     def execute_program(self, program: Program) -> None:
@@ -157,11 +206,26 @@ class RuntimeEngine:
 
     def execute_block(self, statements: list[Any], scope: Scope, *, test_context: bool = False) -> None:
         for statement in statements:
+            self._check_budget(getattr(statement, "line", None))
             label = type(statement).__name__
             with self.profiler.measure(label):
                 self.execute_statement(statement, scope, test_context=test_context)
 
     def execute_statement(self, stmt: Any, scope: Scope, *, test_context: bool = False) -> None:
+        if isinstance(stmt, ExportStmt):
+            self.execute_statement(stmt.statement, scope, test_context=test_context)
+            if hasattr(stmt.statement, "name"):
+                scope.mark_export(stmt.statement.name)
+            return
+
+        if isinstance(stmt, UseModuleStmt):
+            self.execute_use_module(stmt, scope)
+            return
+
+        if isinstance(stmt, UseFromModuleStmt):
+            self.execute_use_from_module(stmt, scope)
+            return
+
         if isinstance(stmt, ImportModuleStmt):
             self.execute_import_module(stmt, scope)
             return
@@ -169,6 +233,14 @@ class RuntimeEngine:
         if isinstance(stmt, ImportFromStmt):
             self.execute_import_from(stmt, scope)
             return
+
+        if isinstance(stmt, TryStmt):
+            self.execute_try(stmt, scope, test_context=test_context)
+            return
+
+        if isinstance(stmt, RaiseStmt):
+            val = self.evaluate_expression(stmt.expr, scope, stmt.line)
+            raise UserRaisedSignal(val, stmt.line)
 
         if isinstance(stmt, SayStmt):
             values = [self.evaluate_expression(part, scope, stmt.line) for part in stmt.parts]
@@ -188,6 +260,8 @@ class RuntimeEngine:
 
         if isinstance(stmt, LetStmt):
             value = self.evaluate_expression(stmt.expr, scope, stmt.line)
+            if self.config.enforce_types and stmt.type_annotation:
+                check_type_or_raise(value, stmt.type_annotation, stmt.name, line=stmt.line)
             scope.define(stmt.name, value)
             return
 
@@ -204,6 +278,36 @@ class RuntimeEngine:
             scope.assign_existing(stmt.name, value, stmt.line)
             return
 
+        if isinstance(stmt, MatchStmt):
+            target_val = self.evaluate_expression(stmt.expr, scope, stmt.line)
+            matched = False
+            for case in stmt.cases:
+                case_scope = Scope(parent=scope)
+                pat = case.pattern.strip()
+                match_ok = False
+                if pat in {"_", "anything", "otherwise"}:
+                    match_ok = True
+                elif is_identifier(pat):
+                    case_scope.define(pat, target_val)
+                    match_ok = True
+                else:
+                    pat_val = self.evaluate_expression(pat, scope, case.line)
+                    if pat_val == target_val:
+                        match_ok = True
+
+                if match_ok:
+                    if case.guard_expr:
+                        guard_val = bool(self.evaluate_expression(case.guard_expr, case_scope, case.line))
+                        if not guard_val:
+                            continue
+                    self.execute_block(case.body, case_scope, test_context=test_context)
+                    matched = True
+                    break
+
+            if not matched and stmt.otherwise_body:
+                self.execute_block(stmt.otherwise_body, scope, test_context=test_context)
+            return
+
         if isinstance(stmt, IfStmt):
             for condition_expr, body in stmt.branches:
                 condition = self.evaluate_expression(condition_expr, scope, stmt.line)
@@ -216,6 +320,7 @@ class RuntimeEngine:
 
         if isinstance(stmt, WhileStmt):
             while bool(self.evaluate_expression(stmt.condition, scope, stmt.line)):
+                self._check_budget(stmt.line)
                 try:
                     self.execute_block(stmt.body, scope, test_context=test_context)
                 except ContinueSignal:
@@ -230,11 +335,20 @@ class RuntimeEngine:
                 iterator = iter(iterable)
             except TypeError as exc:
                 raise RuntimeTppError("'for each' needs something iterable.", stmt.line) from exc
-            for item in iterator:
+
+            for idx, item in enumerate(iterator):
+                self._check_budget(stmt.line)
+                if stmt.index_var:
+                    if scope.has_in_chain(stmt.index_var):
+                        scope.assign_existing(stmt.index_var, idx, stmt.line)
+                    else:
+                        scope.define(stmt.index_var, idx)
+
                 if scope.has_in_chain(stmt.var_name):
                     scope.assign_existing(stmt.var_name, item, stmt.line)
                 else:
                     scope.define(stmt.var_name, item)
+
                 try:
                     self.execute_block(stmt.body, scope, test_context=test_context)
                 except ContinueSignal:
@@ -250,6 +364,7 @@ class RuntimeEngine:
             except (TypeError, ValueError) as exc:
                 raise RuntimeTppError("'repeat' count must be a whole number.", stmt.line) from exc
             for _ in range(max(0, count)):
+                self._check_budget(stmt.line)
                 try:
                     self.execute_block(stmt.body, scope, test_context=test_context)
                 except ContinueSignal:
@@ -270,6 +385,7 @@ class RuntimeEngine:
             step = 1 if end >= start else -1
             stop = end + step
             for value in range(start, stop, step):
+                self._check_budget(stmt.line)
                 if scope.has_in_chain(stmt.var_name):
                     scope.assign_existing(stmt.var_name, value, stmt.line)
                 else:
@@ -292,7 +408,17 @@ class RuntimeEngine:
             return
 
         if isinstance(stmt, FunctionDefStmt):
-            scope.define(stmt.name, TppFunction(stmt.name, stmt.params, stmt.body, scope, is_method=False))
+            fn = TppFunction(
+                stmt.name,
+                stmt.params,
+                stmt.body,
+                scope,
+                is_method=False,
+                return_type=stmt.return_type,
+                param_types=stmt.param_types,
+                param_defaults=stmt.param_defaults,
+            )
+            scope.define(stmt.name, fn)
             return
 
         if isinstance(stmt, ReturnStmt):
@@ -360,6 +486,8 @@ class RuntimeEngine:
                     body=stmt.init_method.body,
                     closure=scope,
                     is_method=True,
+                    param_types=stmt.init_method.param_types,
+                    param_defaults=stmt.init_method.param_defaults,
                 )
 
             methods: dict[str, TppFunction] = {}
@@ -370,6 +498,9 @@ class RuntimeEngine:
                     body=method_stmt.body,
                     closure=scope,
                     is_method=True,
+                    return_type=method_stmt.return_type,
+                    param_types=method_stmt.param_types,
+                    param_defaults=method_stmt.param_defaults,
                 )
 
             scope.define(stmt.name, TppClass(stmt.name, init_method, methods))
@@ -465,12 +596,158 @@ class RuntimeEngine:
 
         raise RuntimeTppError("Unknown statement encountered.", None)
 
+    def execute_try(self, stmt: TryStmt, scope: Scope, *, test_context: bool = False) -> None:
+        try:
+            self.execute_block(stmt.body, scope, test_context=test_context)
+        except ExecutionBudgetExceeded:
+            # Resource limit violations are not catchable by user scripts
+            raise
+        except Exception as exc:
+            # Extract error information
+            handled = False
+            err_obj = exc.error_instance if isinstance(exc, UserRaisedSignal) else exc
+            err_type_name = type(err_obj).__name__
+
+            for handler in stmt.handlers:
+                # Match any error or specific type
+                if (
+                    handler.error_type is None
+                    or handler.error_type == "Error"
+                    or handler.error_type == err_type_name
+                    or (hasattr(err_obj, "category") and handler.error_type.lower() == err_obj.category)
+                    or (isinstance(err_obj, TppError) and handler.error_type in {type(err_obj).__name__, "TppError"})
+                ):
+                    h_scope = Scope(parent=scope)
+                    h_scope.define(handler.var_name, err_obj)
+                    self.execute_block(handler.body, h_scope, test_context=test_context)
+                    handled = True
+                    break
+
+            if not handled:
+                raise
+        finally:
+            if stmt.finally_body:
+                self.execute_block(stmt.finally_body, scope, test_context=test_context)
+
+    def load_tpp_module(self, module_name: str, line: Optional[int] = None) -> ModuleRecord:
+        cached = self.module_registry.get_module(module_name)
+        if cached is not None and cached.is_evaluated:
+            return cached
+
+        # Check native stdlib
+        if module_name in self.native_stdlib:
+            record = ModuleRecord(
+                module_name=module_name,
+                file_path=None,
+                exports={name: self.native_stdlib[module_name].member(name) for name in self.native_stdlib[module_name].members},
+                all_symbols={},
+                is_native=True,
+                is_evaluated=True,
+            )
+            self.module_registry.register_module(record)
+            return record
+
+        # Resolve file path
+        mod_path = self.module_registry.resolve_module_path(
+            module_name,
+            importing_file=Path(self.current_file_path) if self.current_file_path else None,
+        )
+        if mod_path is None:
+            raise ModuleNotFoundTppError(
+                f"Module '{module_name}' could not be found.",
+                line=line,
+                suggestion="Make sure the module .tpp file exists in the current directory or workspace.",
+            )
+
+        self.module_registry.begin_loading(module_name, line=line)
+        try:
+            source = mod_path.read_text(encoding="utf-8")
+            mod_scope = Scope(is_module_scope=True)
+            prev_file = self.current_file_path
+            self.current_file_path = str(mod_path)
+            try:
+                mod_program = self.parse_source(source, file_path=str(mod_path))
+                self.execute_block(mod_program.statements, mod_scope)
+            finally:
+                self.current_file_path = prev_file
+
+            exports = {}
+            if mod_scope.has_explicit_exports:
+                for name in mod_scope.exported_names:
+                    if name in mod_scope.values:
+                        exports[name] = mod_scope.values[name]
+            else:
+                exports = dict(mod_scope.values)
+
+            record = ModuleRecord(
+                module_name=module_name,
+                file_path=mod_path,
+                exports=exports,
+                all_symbols=dict(mod_scope.values),
+                is_native=False,
+                is_evaluated=True,
+            )
+            self.module_registry.register_module(record)
+            return record
+        finally:
+            self.module_registry.finish_loading(module_name)
+
+    def execute_use_module(self, stmt: UseModuleStmt, scope: Scope) -> None:
+        root = stmt.module.split(".")[0].strip("\"' ")
+        alias = stmt.alias if stmt.alias else root
+
+        # Check native or file
+        if root in self.native_stdlib:
+            scope.define(alias, self.native_stdlib[root])
+            return
+
+        record = self.load_tpp_module(root, stmt.line)
+        # Create a module namespace container
+        class ModuleNamespace:
+            def __init__(self, exports: dict[str, Any], name: str) -> None:
+                self._exports = exports
+                self._name = name
+                for k, v in exports.items():
+                    setattr(self, k, v)
+            def __repr__(self) -> str:
+                return f"<module '{self._name}'>"
+
+        scope.define(alias, ModuleNamespace(record.exports, root))
+
+    def execute_use_from_module(self, stmt: UseFromModuleStmt, scope: Scope) -> None:
+        root = stmt.module.split(".")[0].strip("\"' ")
+        if root in self.native_stdlib:
+            module = self.native_stdlib[root]
+            for name, alias in stmt.names:
+                eff_alias = alias or name
+                if not module.has_member(name):
+                    raise RuntimeTppError(f"'{stmt.module}' has no member named '{name}'.", stmt.line)
+                scope.define(eff_alias, module.member(name))
+            return
+
+        record = self.load_tpp_module(root, stmt.line)
+        for name, alias in stmt.names:
+            eff_alias = alias or name
+            if name not in record.exports:
+                raise ModuleNotFoundTppError(
+                    f"'{name}' is not exported by module '{root}'.",
+                    line=stmt.line,
+                    suggestion=f"Export it in '{root}.tpp' with: export define {name} ...",
+                )
+            scope.define(eff_alias, record.exports[name])
+
     def execute_import_module(self, stmt: ImportModuleStmt, scope: Scope) -> None:
         root = stmt.module.split(".")[0]
         alias = stmt.alias if stmt.alias else root
 
         if root in self.native_stdlib and stmt.module == root:
             scope.define(alias, self.native_stdlib[root])
+            return
+
+        # Check if local .tpp module exists first
+        mod_path = self.module_registry.resolve_module_path(root, Path(self.current_file_path) if self.current_file_path else None)
+        if mod_path is not None:
+            self.execute_use_module(UseModuleStmt(line=stmt.line, module=root, alias=stmt.alias), scope)
             return
 
         if not self.config.allow_python_bridge:
@@ -489,6 +766,12 @@ class RuntimeEngine:
             if not module.has_member(stmt.name):
                 raise RuntimeTppError(f"'{stmt.module}' has no member named '{stmt.name}'.", stmt.line)
             scope.define(alias, module.member(stmt.name))
+            return
+
+        # Check if local .tpp module exists first
+        mod_path = self.module_registry.resolve_module_path(root, Path(self.current_file_path) if self.current_file_path else None)
+        if mod_path is not None:
+            self.execute_use_from_module(UseFromModuleStmt(line=stmt.line, module=root, names=[(stmt.name, stmt.alias)]), scope)
             return
 
         if not self.config.allow_python_bridge:
@@ -537,6 +820,81 @@ class RuntimeEngine:
             target = scope.get(class_name, line)
             return self.invoke_target(target, args, line)
 
+        # Comprehension: a list containing <expr> for each <var> in <iterable> [if <cond>]
+        comp_match = re.match(
+            r"^a\s+list\s+containing\s+(.+?)\s+for\s+each\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\s+(.+?)(?:\s+if\s+(.+))?$",
+            text,
+            re.IGNORECASE,
+        )
+        if comp_match:
+            item_expr = comp_match.group(1).strip()
+            var_name = comp_match.group(2).strip()
+            iter_expr = comp_match.group(3).strip()
+            filter_expr = comp_match.group(4).strip() if comp_match.group(4) else None
+
+            iterable = self.evaluate_expression(iter_expr, scope, line)
+            result = []
+            for elem in iterable:
+                loop_scope = Scope(parent=scope)
+                loop_scope.define(var_name, elem)
+                if filter_expr:
+                    cond_ok = bool(self.evaluate_expression(filter_expr, loop_scope, line))
+                    if not cond_ok:
+                        continue
+                evaluated_item = self.evaluate_expression(item_expr, loop_scope, line)
+                result.append(evaluated_item)
+            return result
+
+        # Filter comprehension: the items in <list> where <cond>
+        filter_match = re.match(r"^(?:the|all)\s+items\s+in\s+(.+?)\s+where\s+(.+)$", text, re.IGNORECASE)
+        if filter_match:
+            iter_expr = filter_match.group(1).strip()
+            cond_expr = filter_match.group(2).strip()
+            iterable = self.evaluate_expression(iter_expr, scope, line)
+            result = []
+            for elem in iterable:
+                loop_scope = Scope(parent=scope)
+                loop_scope.define("item", elem)
+                loop_scope.define("it", elem)
+                if bool(self.evaluate_expression(cond_expr, loop_scope, line)):
+                    result.append(elem)
+            return result
+
+        # Record literal: a record with <k1> as <v1> and <k2> as <v2>
+        record_with_match = re.match(r"^a\s+record\s+with\s+(.+)$", text, re.IGNORECASE)
+        if record_with_match:
+            content = record_with_match.group(1).strip()
+            if not content:
+                return {}
+            parts = split_top_level(content, " and ")
+            rec_obj: dict[str, Any] = {}
+            for part in parts:
+                if " as " in part:
+                    k, v = part.split(" as ", 1)
+                    k_str = k.strip().strip("\"'")
+                    val = self.evaluate_expression(v.strip(), scope, line)
+                    rec_obj[k_str] = val
+                elif ":" in part:
+                    k, v = part.split(":", 1)
+                    k_str = k.strip().strip("\"'")
+                    val = self.evaluate_expression(v.strip(), scope, line)
+                    rec_obj[k_str] = val
+            return rec_obj
+
+        # List containing: a list containing 1 and 2 and 3 / 1, 2, 3
+        list_cont_match = re.match(r"^a\s+list\s+containing\s+(.+)$", text, re.IGNORECASE)
+        if list_cont_match:
+            content = list_cont_match.group(1).strip()
+            if not content:
+                return []
+            if "," in content:
+                parts = split_top_level(content, ",")
+            elif " and " in content:
+                parts = split_top_level(content, " and ")
+            else:
+                parts = [content]
+            return [self.evaluate_expression(p.strip(), scope, line) for p in parts if p.strip()]
+
         list_match = re.match(r"^a\s+list\s+of\s*(.*)$", text, re.IGNORECASE)
         if list_match:
             content = list_match.group(1).strip()
@@ -545,6 +903,18 @@ class RuntimeEngine:
             parts = split_top_level(content, ",")
             return [self.evaluate_expression(part, scope, line) for part in parts if part]
 
+        # Set containing: a set containing 1 and 2 and 3
+        set_cont_match = re.match(r"^a\s+set\s+containing\s+(.+)$", text, re.IGNORECASE)
+        if set_cont_match:
+            content = set_cont_match.group(1).strip()
+            if not content:
+                return set()
+            if " and " in content:
+                parts = split_top_level(content, " and ")
+            else:
+                parts = split_top_level(content, ",")
+            return {self.evaluate_expression(p.strip(), scope, line) for p in parts if p.strip()}
+
         set_match = re.match(r"^a\s+set\s+of\s*(.*)$", text, re.IGNORECASE)
         if set_match:
             content = set_match.group(1).strip()
@@ -552,6 +922,17 @@ class RuntimeEngine:
                 return set()
             parts = split_top_level(content, ",")
             return {self.evaluate_expression(part, scope, line) for part in parts if part}
+
+        # Range expression: 1 to 10 [by 2]
+        range_match = re.match(r"^(\d+)\s+to\s+(\d+)(?:\s+by\s+(\d+))?$", text, re.IGNORECASE)
+        if range_match:
+            start = int(range_match.group(1))
+            end = int(range_match.group(2))
+            step = int(range_match.group(3)) if range_match.group(3) else 1
+            if end >= start:
+                return list(range(start, end + 1, step))
+            else:
+                return list(range(start, end - 1, -step))
 
         map_match = re.match(r"^a\s+map\s+of\s*(.*)$", text, re.IGNORECASE)
         if map_match:
@@ -656,6 +1037,8 @@ class RuntimeEngine:
         if callable(target):
             try:
                 return target(*args, **kwargs)
+            except TppError:
+                raise
             except Exception as exc:
                 raise RuntimeTppError(str(exc), line) from exc
         raise RuntimeTppError("That value is not callable.", line)
@@ -669,7 +1052,7 @@ class RuntimeEngine:
                 tests.extend(statement.tests)
         return tests
 
-    def run_tests(self, program: Program, *, verbose: bool = False) -> tuple[list[TestResult], int, int]:
+    def run_tests(self, program: Program, verbose: bool = False, filter_pattern: Optional[str] = None) -> tuple[list[TestResult], int, int]:
         setup_statements = [
             statement
             for statement in program.statements
@@ -679,25 +1062,45 @@ class RuntimeEngine:
 
         test_results: list[TestResult] = []
         tests = self.collect_tests(program)
+        if filter_pattern:
+            tests = [t for t in tests if filter_pattern.lower() in t.name.lower()]
+
         for test_case in tests:
             test_scope = Scope(parent=self.global_scope)
             started = time.perf_counter()
             try:
                 self.execute_block(test_case.body, test_scope, test_context=True)
+                if test_case.expected_error:
+                    elapsed = (time.perf_counter() - started) * 1000
+                    test_results.append(
+                        TestResult(
+                            name=test_case.name,
+                            passed=False,
+                            duration_ms=elapsed,
+                            details=f"Expected error '{test_case.expected_error}' but test completed without error.",
+                        )
+                    )
+                    continue
             except TppError as exc:
                 elapsed = (time.perf_counter() - started) * 1000
-                test_results.append(TestResult(name=test_case.name, passed=False, duration_ms=elapsed, details=str(exc)))
+                if test_case.expected_error:
+                    test_results.append(TestResult(name=test_case.name, passed=True, duration_ms=elapsed))
+                else:
+                    test_results.append(TestResult(name=test_case.name, passed=False, duration_ms=elapsed, details=str(exc)))
                 continue
             except Exception as exc:
                 elapsed = (time.perf_counter() - started) * 1000
-                test_results.append(
-                    TestResult(
-                        name=test_case.name,
-                        passed=False,
-                        duration_ms=elapsed,
-                        details=f"Unexpected error: {exc}",
+                if test_case.expected_error:
+                    test_results.append(TestResult(name=test_case.name, passed=True, duration_ms=elapsed))
+                else:
+                    test_results.append(
+                        TestResult(
+                            name=test_case.name,
+                            passed=False,
+                            duration_ms=elapsed,
+                            details=f"Unexpected error: {exc}",
+                        )
                     )
-                )
                 continue
 
             elapsed = (time.perf_counter() - started) * 1000
@@ -718,17 +1121,17 @@ class RuntimeEngine:
     def manifest(self) -> dict[str, Any]:
         return {
             "name": "T++",
-            "version": __version__,
+            "version": VERSION,
             "runtime": "tpp-runtime",
             "parser_modes": ["strict", "fuzzy", "intent"],
-            "keywords": sorted(CORE_STATEMENT_STARTERS | self.plugin_manager.keywords),
+            "keywords": sorted(CORE_STATEMENT_STARTERS | self.plugin_manager.keywords | {"use", "export", "try", "handle", "finally", "raise"}),
             "python_bridge_modules": sorted(ALLOWED_PYTHON_MODULES),
             "native_modules": sorted(self.native_stdlib.keys()),
             "modes": ["run", "repl", "test", "pipe", "api"],
             "examples": [
-                "let x be 5",
+                "let x be 5 as a number",
                 "increase x by 2",
-                "create window titled \"My App\"",
+                "use the \"shapes\" module",
                 "test \"addition\":",
             ],
         }

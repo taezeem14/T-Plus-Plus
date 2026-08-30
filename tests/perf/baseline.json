@@ -1,0 +1,30 @@
+{
+  "tight_loop": {
+    "name": "tight_loop",
+    "iterations": 10,
+    "total_time_sec": 0.5533714999983204,
+    "avg_ms": 55.337149999832036,
+    "ops_per_sec": 18.07104269018255
+  },
+  "fibonacci_recursion": {
+    "name": "fibonacci_recursion",
+    "iterations": 5,
+    "total_time_sec": 0.32137000000147964,
+    "avg_ms": 64.27400000029593,
+    "ops_per_sec": 15.558390640000558
+  },
+  "string_operations": {
+    "name": "string_operations",
+    "iterations": 20,
+    "total_time_sec": 0.17571160000079544,
+    "avg_ms": 8.785580000039772,
+    "ops_per_sec": 113.82287794265979
+  },
+  "collection_comprehension": {
+    "name": "collection_comprehension",
+    "iterations": 15,
+    "total_time_sec": 0.10085120000076131,
+    "avg_ms": 6.723413333384087,
+    "ops_per_sec": 148.7339763918205
+  }
+}

@@ -13,12 +13,18 @@ from tpp.core.ast_nodes import (
     ExpectEqualStmt,
     ExpectRangeStmt,
     ExpectTypeStmt,
+    ExportStmt,
     ForEachStmt,
     FunctionDefStmt,
+    HandleClause,
     IfStmt,
+    ImportFromStmt,
+    ImportModuleStmt,
     LetStmt,
+    MatchStmt,
     OnButtonClickStmt,
     Program,
+    RaiseStmt,
     RegisterKeywordStmt,
     RememberStmt,
     RepeatStmt,
@@ -26,15 +32,19 @@ from tpp.core.ast_nodes import (
     SmartAssignStmt,
     TestStmt,
     TestSuiteStmt,
+    TryStmt,
+    UseFromModuleStmt,
+    UseModuleStmt,
     WhileStmt,
 )
-from tpp.core.errors import SemanticTppError
+from tpp.core.errors import Diagnostic, DiagnosticSeverity, SemanticTppError
 from tpp.core.utils import suggest_closest
 
 
 @dataclass
 class SemanticConfig:
     strict_variable_resolution: bool = False
+    strict_types: bool = False
 
 
 @dataclass
@@ -50,6 +60,7 @@ class SemanticAnalyzer:
     def __init__(self, config: Optional[SemanticConfig] = None) -> None:
         self.config = config or SemanticConfig()
         self.inferred_types: dict[str, str] = {}
+        self.diagnostics: list[Diagnostic] = []
 
     def analyze(self, program: Program) -> dict[str, str]:
         context = SemanticContext(symbols=set())
@@ -58,6 +69,60 @@ class SemanticAnalyzer:
         return dict(self.inferred_types)
 
     def _visit(self, stmt: Any, context: SemanticContext) -> None:
+        if isinstance(stmt, ExportStmt):
+            self._visit(stmt.statement, context)
+            return
+
+        if isinstance(stmt, UseModuleStmt):
+            alias = stmt.alias or stmt.module.split("/")[-1].split(".")[0]
+            context.symbols.add(alias)
+            self.inferred_types[alias] = "module"
+            return
+
+        if isinstance(stmt, UseFromModuleStmt):
+            for name, alias in stmt.names:
+                eff_name = alias or name
+                context.symbols.add(eff_name)
+                self.inferred_types.setdefault(eff_name, "Any")
+            return
+
+        if isinstance(stmt, ImportModuleStmt):
+            alias = stmt.alias or stmt.module.split(".")[-1]
+            context.symbols.add(alias)
+            self.inferred_types[alias] = "module"
+            return
+
+        if isinstance(stmt, ImportFromStmt):
+            eff_name = stmt.alias or stmt.name
+            context.symbols.add(eff_name)
+            self.inferred_types.setdefault(eff_name, "Any")
+            return
+
+        if isinstance(stmt, TryStmt):
+            self._visit_block(stmt.body, self._fork_context(context))
+            for handler in stmt.handlers:
+                h_ctx = self._fork_context(context)
+                h_ctx.symbols.add(handler.var_name)
+                self.inferred_types[handler.var_name] = handler.error_type or "Error"
+                self._visit_block(handler.body, h_ctx)
+            if stmt.finally_body:
+                self._visit_block(stmt.finally_body, self._fork_context(context))
+            return
+
+        if isinstance(stmt, RaiseStmt):
+            return
+
+        if isinstance(stmt, MatchStmt):
+            for case in stmt.cases:
+                case_ctx = self._fork_context(context)
+                pat = case.pattern.strip()
+                if pat not in {"_", "anything", "otherwise"} and pat.isidentifier():
+                    case_ctx.symbols.add(pat)
+                self._visit_block(case.body, case_ctx)
+            if stmt.otherwise_body:
+                self._visit_block(stmt.otherwise_body, self._fork_context(context))
+            return
+
         if isinstance(stmt, IfStmt):
             for _condition, body in stmt.branches:
                 self._visit_block(body, self._fork_context(context))
@@ -71,6 +136,9 @@ class SemanticAnalyzer:
 
         if isinstance(stmt, ForEachStmt):
             inner = self._fork_context(context, in_loop=True)
+            if stmt.index_var:
+                inner.symbols.add(stmt.index_var)
+                self.inferred_types[stmt.index_var] = "int"
             inner.symbols.add(stmt.var_name)
             self.inferred_types.setdefault(stmt.var_name, "Any")
             self._visit_block(stmt.body, inner)
@@ -93,7 +161,10 @@ class SemanticAnalyzer:
             fn_ctx = self._fork_context(context, in_function=True)
             for param in stmt.params:
                 fn_ctx.symbols.add(param)
-                self.inferred_types.setdefault(param, "Any")
+                if param in stmt.param_types:
+                    self.inferred_types[param] = str(stmt.param_types[param])
+                else:
+                    self.inferred_types.setdefault(param, "Any")
             self._visit_block(stmt.body, fn_ctx)
             return
 
@@ -126,7 +197,10 @@ class SemanticAnalyzer:
 
         if isinstance(stmt, LetStmt):
             context.symbols.add(stmt.name)
-            self.inferred_types[stmt.name] = self._infer_type(stmt.expr)
+            if stmt.type_annotation:
+                self.inferred_types[stmt.name] = str(stmt.type_annotation)
+            else:
+                self.inferred_types[stmt.name] = self._infer_type(stmt.expr)
             return
 
         if isinstance(stmt, SmartAssignStmt):

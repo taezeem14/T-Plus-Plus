@@ -1,0 +1,33 @@
+{
+  "manifest_version": 1,
+  "name": "spanish_keywords",
+  "version": "1.0.0",
+  "description": "Spanish keywords and synonyms for T++",
+  "author": "T++ Core Team",
+  "permissions": [],
+  "dependencies": [],
+  "keywords": [
+    {
+      "phrase": "decir",
+      "template": "say {0}"
+    },
+    {
+      "phrase": "definir funcion",
+      "template": "define {rest}"
+    }
+  ],
+  "synonyms": [
+    {
+      "natural": "mas",
+      "symbol": "+",
+      "category": "arithmetic",
+      "description": "Spanish plus operator"
+    },
+    {
+      "natural": "menos",
+      "symbol": "-",
+      "category": "arithmetic",
+      "description": "Spanish minus operator"
+    }
+  ]
+}

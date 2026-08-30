@@ -1,211 +1,203 @@
-# T++
+# T++ (Antigravity 2.0 Edition)
 
-> Human-first programming, engineered for real-world software.
+> Human-first natural language programming, engineered for deterministic, production-grade software.
 
 [![Python](https://img.shields.io/pypi/pyversions/tpp-language?style=for-the-badge)](https://pypi.org/project/tpp-language/)
 [![CI](https://img.shields.io/github/actions/workflow/status/taezeem14/T-Plus-Plus/ci.yml?branch=main&style=for-the-badge&label=CI)](https://github.com/taezeem14/T-Plus-Plus/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/actions/workflow/status/taezeem14/T-Plus-Plus/release.yml?style=for-the-badge&label=Release)](https://github.com/taezeem14/T-Plus-Plus/actions/workflows/release.yml)
-[![License](https://img.shields.io/badge/license-see%20repository-blue?style=for-the-badge)](https://github.com/taezeem14/T-Plus-Plus)
+[![License](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge)](https://github.com/taezeem14/T-Plus-Plus)
 
-T++ is a next-generation language platform that lets developers write expressive, natural syntax while keeping deterministic runtime behavior, modern tooling, and production CI discipline.
+T++ is a modern, natural-language programming language and development platform. It allows developers to write expressive, prose-like code with deterministic execution, static and gradual typing, rich visual diagnostics, an expanded standard library, and complete developer tooling.
 
-Current stable release: `3.1.3`
-
-Download from PyPI:
+Current Release: `3.2.0`
 
 ```bash
 pip install tpp-language
 ```
 
-## Why T++
+---
 
-- Natural language syntax that remains readable to humans and executable by machines.
-- Full CLI workflow for run, repl, test, plugin management, API serving, and diagnostics.
-- Extensible plugin system with keyword rewrites and transform hooks.
-- Built-in web IDE backend and JSON execution API.
-- PyPI distribution for immediate adoption: `pip install tpp-language`.
+## Key Highlights
 
-## Features
+- **Natural Surface Syntax & Synonyms**: Write in readable English phrases (`give back`, `is between 1 and 10`, `the items in tasks where item's is_done`, `a record with name as "Ana"`).
+- **Gradual Type System**: Optional type annotations on variables (`let count be 0 as a whole number`) and functions (`define add with a as a number, giving back a number as:`).
+- **Rich Visual Diagnostics**: Beautiful terminal compiler errors with line/column markers, carets, source previews, suggestions, and call stack frame tracking.
+- **Sandboxed Standard Library**: 7 built-in modules (`math`, `text`, `collections`, `system`, `time`, `json`, `validate`) with path traversal protection.
+- **Language Server Protocol (LSP)**: Integrated LSP server (`tpp lsp`) providing live diagnostics, hover docs, autocomplete, definition jump, and formatting for VS Code / IDEs.
+- **Full Developer CLI**: Unified subcommands: `run`, `check`, `fmt`, `doc`, `repl`, `test`, `bench`, `lsp`, `api`, `doctor`, `plugin`.
+- **Public Python Embedding API**: Seamless Python interop with `tpp.run_source()`, `tpp.run_file()`, and `tpp.eval_expr()`.
 
-- Human-first syntax with strict, fuzzy, and intent parsing modes.
-- Modular architecture: parser, runtime engine, stdlib, API, CLI, plugins.
-- Test blocks and suites directly in `.tpp` source.
-- Configurable project behavior via `.tppconfig`.
-- CI/CD-ready repository with matrix validation and release automation.
+---
 
-## Installation
+## Quick Start
+
+### 1. Installation
 
 ```bash
 pip install tpp-language
 ```
 
-Verify install:
+Verify your environment:
 
 ```bash
 tpp --version
 tpp doctor
 ```
 
-Local development install:
+### 2. Hello World
 
-```bash
-python -m pip install -e .[dev]
+Create `hello.tpp`:
+
+```tpp
+let name be "Developer"
+say "Hello, {name}! Welcome to T++."
 ```
 
-## Usage
-
-Run a script:
+Run it:
 
 ```bash
-tpp run examples/hello.tpp
+tpp run hello.tpp
 ```
 
-Start interactive REPL:
+---
 
-```bash
-tpp repl
+## Language Features at a Glance
+
+### Pattern Matching (`match`)
+
+```tpp
+match status_code:
+    when 200:
+        say "Success"
+    when 404:
+        say "Not Found"
+    when x if x is at least 500:
+        say "Server Error: {x}"
+    otherwise:
+        say "Unhandled status"
 ```
 
-Run regression tests:
+### Comprehensions & Collections
 
-```bash
-tpp test tests/regression.tpp
+```tpp
+let numbers be 1 to 10
+let evens be a list containing x times 2 for each x in numbers if x % 2 == 0
+let filtered be the items in numbers where item is greater than 5
+
+let person be a record with name as "Alice" and role as "Admin"
+say "{person's name} has role {person's role}"
 ```
 
-Plugin workflow:
+### Error Handling (`try / handle / finally`)
 
-```bash
-tpp plugin install examples/sample_plugin.json
-tpp plugin list
-tpp run examples/plugin_demo.tpp --plugin examples/sample_plugin.json
+```tpp
+try:
+    if divisor is equal to 0:
+        raise the error "Cannot divide by zero"
+    let result be total / divisor
+handle any error as err:
+    say "Caught error: " then err
+finally:
+    say "Execution completed."
 ```
 
-Start API + Web IDE:
+### Modules & Imports
 
-```bash
-tpp api --serve --host 127.0.0.1 --port 8787
+```tpp
+# In math_utils.tpp
+export define square with n as:
+    give back n times n
+
+# In main.tpp
+use square from "./math_utils.tpp"
+let val be call square with 6
 ```
 
-Open `http://127.0.0.1:8787/` in your browser.
+---
 
-## Architecture Overview
+## CLI Reference
+
+| Command | Description | Example |
+|---|---|---|
+| `tpp run <file>` | Execute a T++ file | `tpp run app.tpp` |
+| `tpp check <file>` | Statically check syntax & types | `tpp check app.tpp` |
+| `tpp fmt <file>` | Auto-format source code | `tpp fmt app.tpp --write` |
+| `tpp doc <file\|mod>` | Generate Markdown documentation | `tpp doc math` / `tpp doc app.tpp` |
+| `tpp repl` | Start interactive shell with meta-commands | `tpp repl` |
+| `tpp test [file]` | Run test blocks (supports `--json`, `--junit`) | `tpp test tests/ --json` |
+| `tpp bench` | Run runtime performance benchmark suite | `tpp bench` |
+| `tpp lsp` | Run Language Server Protocol server | `tpp lsp --stdio` |
+| `tpp api` | Start Web IDE and JSON HTTP API | `tpp api --serve --port 8787` |
+| `tpp doctor` | Run installation & environment diagnostics | `tpp doctor` |
+| `tpp plugin` | Install and list extensions | `tpp plugin install plugin.json` |
+
+---
+
+## Interactive REPL
+
+Launch the REPL with `tpp repl`:
 
 ```text
-tpp/
-	core/      -> AST, constants, diagnostics, utilities
-	parser/    -> lexer, parser, semantic analyzer, optimizer
-	runtime/   -> engine, evaluator, environment, interop, profiler
-	stdlib/    -> native modules (math, text, system, time)
-	plugins/   -> plugin loading, metadata, transforms
-	cli/       -> command surface (run/repl/test/plugin/api/doctor)
-	api/       -> JSON execution API + web IDE server
+T++ Interactive Shell v3.2.0
+Type ':help' or ':?' for commands, ':quit' or 'exit' to exit.
+
+>> let x be 10 plus 20
+>> :type x
+x : int = 30
+>> :doc math
+Native Stdlib Module 'math'
+Members: abs, absolute_value, add, average, ceil, cos, cosine, divide...
+>> :env
+--- Scope (1 bindings) ---
+  x (int) = 30
+>> :quit
 ```
 
-Design goal: natural syntax at the top, predictable execution at the core.
+---
 
-## Examples
+## Python Embedding API
 
-Simple script:
+Embed T++ directly in Python applications:
 
-```tpp
-say "Hello from T++"
-let name be "Developer"
-say "Welcome" then name
+```python
+import tpp
+
+# Execute source code
+engine = tpp.run_source(
+    "let result be a times b\n",
+    initial_scope={"a": 6, "b": 7}
+)
+print(engine.global_scope.get("result", 1)) # 42
+
+# Evaluate single expressions
+value = tpp.eval_expr("10 plus 25") # 35
 ```
 
-Natural arithmetic and expectations:
+---
 
-```tpp
-let x be 4
-increase x by 6
-expect x to be 10
-```
+## Standard Library Reference
 
-API payload:
+| Module | Key Functions & Constants |
+|---|---|
+| `math` | `sin`, `cos`, `tan`, `sqrt`, `log`, `floor`, `ceil`, `round`, `abs`, `average`, `median`, `is_prime`, `pi`, `e`, `tau` |
+| `text` | `uppercase`, `lowercase`, `title`, `trimmed`, `replace`, `contains`, `format_currency`, `matches_pattern`, `words_in` |
+| `collections` | `map_items`, `filter_items`, `reduce_items`, `group_by`, `unique_items`, `chunk_items`, `flatten`, `zip_items` |
+| `system` | `read_file`, `write_file`, `append_file`, `file_exists`, `list_files`, `get_env`, `command_line_arguments` |
+| `time` | `current_moment`, `format_moment`, `parse_moment`, `time_difference`, `shift_time`, `sleep_seconds`, `now` |
+| `json` | `parse_json`, `to_json` |
+| `validate` | `is_valid_email`, `is_valid_number`, `is_within_range`, `is_not_nothing`, `is_empty` |
 
-```json
-{
-	"source": "let x be 5\nsay x",
-	"mode": "run"
-}
-```
+---
 
-## Roadmap
+## Documentation
 
-- Richer language server and editor integration.
-- Expanded standard library and package ecosystem.
-- Advanced plugin marketplace and sharing model.
-- Enhanced debugging and profiling introspection.
-- Cloud-hosted collaborative web IDE experience.
+- [Language Specification](docs/LANGUAGE_SPEC.md)
+- [Standard Library Guide](docs/STDLIB.md)
+- [Migration Guide (3.1.x to 3.2.0)](docs/MIGRATION.md)
+- [Architecture Decision Records (ADRs)](docs/decisions/)
 
-## Validation and CI
+---
 
-This repository includes production-ready GitHub Actions workflows:
+## License
 
-- `.github/workflows/ci.yml`: continuous validation for push and pull request
-- `.github/workflows/release.yml`: tag-based release build + GitHub Release + optional PyPI publish
-
-CI validates:
-
-- package installation (`pip install .`)
-- compile checks (`python -m compileall -q tpp`)
-- linting (`ruff check tpp tests scripts`)
-- required CLI contract (`tpp --version`, `run`, `test`, `repl`, `plugin install/list`)
-- `tpp doctor` diagnostics
-
-## Release Process
-
-Create a semantic version tag:
-
-```powershell
-git tag v3.1.1
-git push origin v3.1.1
-```
-
-The release workflow will:
-
-- build wheel + sdist
-- run `twine check`
-- run smoke tests against built wheel
-- generate release notes from git history
-- publish a GitHub release with artifacts
-
-Optional PyPI publish:
-
-- run release workflow manually with `publish_to_pypi=true`, or
-- set repository variable `TPP_PUBLISH_PYPI=true` for tag pushes
-
-## Developer Workflow
-
-```powershell
-python -m pip install -e .[dev]
-pre-commit install
-python scripts/ci_validate.py
-pytest -q tests/test_cli_integration.py
-```
-
-## Security Notes
-
-- Python module bridging is allow-listed
-- system stdlib file operations are workspace-sandboxed
-- plugin Python hooks are namespace-restricted
-
-## Project Layout
-
-- tpp/
-- examples/
-- tests/
-- docs/
-- README.md
-- pyproject.toml
-
-## Publish Readiness
-
-This codebase is structured for GitHub publishing and pip installation.
-
-For documentation details:
-
-- docs/language-guide.md
-- docs/plugin-guide.md
-- docs/web-ide.md
-- docs/devops.md
+T++ is licensed under the MIT License.

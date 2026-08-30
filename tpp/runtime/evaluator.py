@@ -1,12 +1,21 @@
 from __future__ import annotations
 
 import ast
-from typing import Any
+import re
+from typing import Any, TYPE_CHECKING
 
 from tpp.core.constants import SAFE_GLOBAL_NAMES
-from tpp.core.errors import RuntimeTppError
+from tpp.core.errors import (
+    IndexTppError,
+    KeyNotFoundTppError,
+    MathTppError,
+    RuntimeTppError,
+)
 from tpp.parser.lexer import ExpressionTokenizer
 from tpp.runtime.environment import Scope
+
+if TYPE_CHECKING:
+    from tpp.runtime.engine import RuntimeEngine
 
 
 class ExpressionEvaluator:
@@ -57,6 +66,17 @@ class ExpressionEvaluator:
         self.tokenizer = ExpressionTokenizer()
         self._ast_cache: dict[str, ast.Expression] = {}
 
+    def _interpolate_string(self, text: str, scope: Scope, line: int) -> str:
+        def _repl(match: re.Match[str]) -> str:
+            inner = match.group(1).strip()
+            try:
+                val = self.engine.evaluate_expression(inner, scope, line)
+                return str(val)
+            except Exception:
+                return match.group(0)
+
+        return re.sub(r"\{([^{}]+)\}", _repl, text)
+
     def evaluate(self, expr: str, scope: Scope, line: int) -> Any:
         text = expr.strip()
         if not text:
@@ -81,6 +101,8 @@ class ExpressionEvaluator:
 
     def _eval_node(self, node: ast.AST, scope: Scope, line: int) -> Any:
         if isinstance(node, ast.Constant):
+            if isinstance(node.value, str) and "{" in node.value and "}" in node.value:
+                return self._interpolate_string(node.value, scope, line)
             return node.value
 
         if isinstance(node, ast.Name):
@@ -110,18 +132,23 @@ class ExpressionEvaluator:
         if isinstance(node, ast.BinOp):
             left = self._eval_node(node.left, scope, line)
             right = self._eval_node(node.right, scope, line)
-            if isinstance(node.op, ast.Add):
-                return left + right
-            if isinstance(node.op, ast.Sub):
-                return left - right
-            if isinstance(node.op, ast.Mult):
-                return left * right
-            if isinstance(node.op, ast.Div):
-                return left / right
-            if isinstance(node.op, ast.Mod):
-                return left % right
-            if isinstance(node.op, ast.Pow):
-                return left**right
+            try:
+                if isinstance(node.op, ast.Add):
+                    return left + right
+                if isinstance(node.op, ast.Sub):
+                    return left - right
+                if isinstance(node.op, ast.Mult):
+                    return left * right
+                if isinstance(node.op, ast.Div):
+                    return left / right
+                if isinstance(node.op, ast.Mod):
+                    return left % right
+                if isinstance(node.op, ast.Pow):
+                    return left**right
+            except ZeroDivisionError:
+                raise MathTppError("Cannot divide by zero.", line)
+            except TypeError as e:
+                raise RuntimeTppError(f"Cannot perform operation between {type(left).__name__} and {type(right).__name__}: {e}", line)
             raise RuntimeTppError("Unsupported binary operation.", line)
 
         if isinstance(node, ast.UnaryOp):
@@ -180,9 +207,13 @@ class ExpressionEvaluator:
 
         if isinstance(node, ast.Attribute):
             target = self._eval_node(node.value, scope, line)
-            if not hasattr(target, node.attr):
-                raise RuntimeTppError(f"Target has no member named '{node.attr}'.", line)
-            return getattr(target, node.attr)
+            if isinstance(target, dict) and node.attr in target:
+                return target[node.attr]
+            if hasattr(target, node.attr):
+                return getattr(target, node.attr)
+            if hasattr(target, "fields") and node.attr in target.fields:
+                return target.fields[node.attr]
+            raise RuntimeTppError(f"Target has no member or key named '{node.attr}'.", line)
 
         if isinstance(node, ast.Subscript):
             target = self._eval_node(node.value, scope, line)
@@ -193,7 +224,12 @@ class ExpressionEvaluator:
                 return target[slice(start, stop, step)]
 
             index = self._eval_node(node.slice, scope, line)
-            return target[index]
+            try:
+                return target[index]
+            except IndexError:
+                raise IndexTppError(f"Index {index} out of range for collection of size {len(target) if hasattr(target, '__len__') else 'unknown'}.", line)
+            except KeyError:
+                raise KeyNotFoundTppError(f"Key '{index}' not found in record/dictionary.", line)
 
         if isinstance(node, ast.Call):
             target = self._eval_node(node.func, scope, line)
@@ -202,9 +238,3 @@ class ExpressionEvaluator:
             return self.engine.invoke_target(target, args, line, kwargs=kwargs)
 
         raise RuntimeTppError("That expression uses unsupported syntax.", line)
-
-
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from tpp.runtime.engine import RuntimeEngine

@@ -5,17 +5,22 @@ import json
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 from tpp.core.ast_nodes import FunctionDefStmt, Program
 from tpp.core.errors import PluginTppError, SecurityTppError
 from tpp.core.utils import normalize_phrase
+from tpp.parser.synonyms import GLOBAL_SYNONYMS, SynonymEntry
 
 
 @dataclass
 class PluginMetadata:
     name: str
     version: str
+    manifest_version: int = 1
+    description: str = ""
+    author: str = ""
+    permissions: list[str] = field(default_factory=list)
     dependencies: list[str] = field(default_factory=list)
 
 
@@ -25,6 +30,7 @@ class PluginManager:
         self.keyword_rewrites: dict[str, str] = {}
         self.keywords: set[str] = set()
         self.ast_transforms: list[Callable[[Program], Program]] = []
+        self.custom_stdlib_modules: dict[str, Any] = {}
 
     def snapshot_keywords(self) -> tuple[dict[str, str], set[str]]:
         return dict(self.keyword_rewrites), set(self.keywords)
@@ -39,7 +45,7 @@ class PluginManager:
         except json.JSONDecodeError as exc:
             raise PluginTppError(f"Plugin file '{plugin_path}' is not valid JSON: {exc}") from exc
 
-        metadata, keywords, transforms, python_hooks = self._normalize_plugin_payload(data, plugin_path)
+        metadata, keywords, synonyms, transforms, python_hooks = self._normalize_plugin_payload(data, plugin_path)
 
         missing_deps = [dep for dep in metadata.dependencies if dep not in self.loaded_plugins]
         if missing_deps:
@@ -53,6 +59,9 @@ class PluginManager:
             self.keywords.add(norm)
             if template is not None:
                 self.keyword_rewrites[norm] = template
+
+        for syn in synonyms:
+            GLOBAL_SYNONYMS.register(syn)
 
         for transform in transforms:
             self.ast_transforms.append(self._build_builtin_transform(transform, metadata.name))
@@ -86,12 +95,25 @@ class PluginManager:
         self,
         data: Any,
         plugin_path: Path,
-    ) -> tuple[PluginMetadata, list[tuple[str, str | None]], list[dict[str, Any]], list[dict[str, Any]]]:
+    ) -> tuple[PluginMetadata, list[tuple[str, str | None]], list[SynonymEntry], list[dict[str, Any]], list[dict[str, Any]]]:
         if isinstance(data, dict) and "name" in data:
             name = str(data.get("name", "")).strip()
-            version = str(data.get("version", "0.0.0")).strip() or "0.0.0"
+            version = str(data.get("version", "1.0.0")).strip() or "1.0.0"
+            manifest_version = int(data.get("manifest_version", 1))
+            description = str(data.get("description", ""))
+            author = str(data.get("author", ""))
+            permissions = [str(p).strip() for p in data.get("permissions", []) if str(p).strip()]
             dependencies = [str(dep).strip() for dep in data.get("dependencies", []) if str(dep).strip()]
-            metadata = PluginMetadata(name=name, version=version, dependencies=dependencies)
+
+            metadata = PluginMetadata(
+                name=name,
+                version=version,
+                manifest_version=manifest_version,
+                description=description,
+                author=author,
+                permissions=permissions,
+                dependencies=dependencies,
+            )
 
             if not metadata.name:
                 raise PluginTppError(f"Plugin '{plugin_path}' is missing a valid name.")
@@ -108,11 +130,22 @@ class PluginManager:
                         continue
                     keywords.append((phrase, str(template).strip() if isinstance(template, str) else None))
 
+            synonyms: list[SynonymEntry] = []
+            raw_synonyms = data.get("synonyms", [])
+            for entry in raw_synonyms:
+                if isinstance(entry, dict):
+                    nat = str(entry.get("natural", "")).strip()
+                    sym = str(entry.get("symbol", "")).strip()
+                    cat = str(entry.get("category", "plugin")).strip()
+                    desc = str(entry.get("description", f"Plugin {name} synonym")).strip()
+                    if nat and sym:
+                        synonyms.append(SynonymEntry(natural_spelling=nat, symbol_spelling=sym, category=cat, description=desc, source=name))
+
             transforms = [item for item in data.get("transforms", []) if isinstance(item, dict)]
             python_hooks = [item for item in data.get("python_hooks", []) if isinstance(item, dict)]
-            return metadata, keywords, transforms, python_hooks
+            return metadata, keywords, synonyms, transforms, python_hooks
 
-        # Backward-compatible simple plugin formats
+        # Backward-compatible simple plugin format
         metadata = PluginMetadata(name=plugin_path.stem, version="0.0.0")
         keywords: list[tuple[str, str | None]] = []
         if isinstance(data, dict):
@@ -138,7 +171,7 @@ class PluginManager:
                     if phrase:
                         keywords.append((phrase, str(template).strip() if isinstance(template, str) else None))
 
-        return metadata, keywords, [], []
+        return metadata, keywords, [], [], []
 
     def _build_builtin_transform(self, transform_spec: dict[str, Any], plugin_name: str) -> Callable[[Program], Program]:
         transform_type = str(transform_spec.get("type", "")).strip()

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from tpp.core.ast_nodes import (
@@ -19,16 +19,22 @@ from tpp.core.ast_nodes import (
     ExpectEqualStmt,
     ExpectRangeStmt,
     ExpectTypeStmt,
+    ExportStmt,
     ExprStmt,
     ForEachStmt,
     FunctionDefStmt,
+    HandleClause,
     IfStmt,
     ImportFromStmt,
     ImportModuleStmt,
     LetStmt,
+    MatchStmt,
+    MatchWhenClause,
     OnButtonClickStmt,
     PassStmt,
     Program,
+    RaiseStmt,
+    RecordTypeDefStmt,
     RegisterKeywordStmt,
     RememberStmt,
     RemoveFromStmt,
@@ -40,10 +46,16 @@ from tpp.core.ast_nodes import (
     SmartAssignStmt,
     TestStmt,
     TestSuiteStmt,
+    TryStmt,
+    TypeAnnotation,
+    UnionTypeAnnotation,
+    UseFromModuleStmt,
+    UseModuleStmt,
     WhileStmt,
 )
 from tpp.core.constants import CORE_STATEMENT_STARTERS, DEFAULT_REWRITE_LIMIT, PARSER_MODES
-from tpp.core.errors import IncompleteBlockError, SyntaxTppError
+from tpp.core.errors import Diagnostic, DiagnosticSeverity, IncompleteBlockError, SyntaxTppError
+from tpp.core.types import parse_type_annotation
 from tpp.core.utils import (
     is_identifier,
     normalize_phrase,
@@ -59,6 +71,7 @@ from tpp.parser.lexer import normalize_assignment_sugar
 class ParserConfig:
     mode: str = "fuzzy"
     repl_mode: bool = False
+    collect_multiple_errors: bool = False
 
 
 class Parser:
@@ -69,16 +82,20 @@ class Parser:
         config: Optional[ParserConfig] = None,
         plugin_rewrites: Optional[dict[str, str]] = None,
         plugin_keywords: Optional[set[str]] = None,
+        file_path: Optional[str] = None,
     ) -> None:
         self.config = config or ParserConfig()
         if self.config.mode not in PARSER_MODES:
             raise SyntaxTppError(f"Unknown parser mode '{self.config.mode}'.")
 
+        self.source = source
+        self.file_path = file_path
         self.lines: list[tuple[int, str]] = [
             (index + 1, line.rstrip("\n")) for index, line in enumerate(source.splitlines())
         ]
         self.plugin_rewrites = plugin_rewrites or {}
         self.plugin_keywords = plugin_keywords or set()
+        self.diagnostics: list[Diagnostic] = []
         self._refresh_plugin_phrase_order()
 
     @property
@@ -96,17 +113,29 @@ class Parser:
         statements, index = self.parse_block(0, 0)
         while index < len(self.lines):
             line_no, text = self.lines[index]
-            if text.strip() == "":
+            stripped = text.strip()
+            if stripped == "" or stripped.startswith("#"):
                 index += 1
                 continue
-            raise SyntaxTppError("Unexpected content after end of block.", line_no)
+            err = SyntaxTppError(
+                "Unexpected content after end of block.",
+                line_no,
+                source_line=text,
+                file_path=self.file_path,
+            )
+            if self.config.collect_multiple_errors:
+                self.diagnostics.append(err.to_diagnostic())
+                index += 1
+            else:
+                raise err
         return Program(statements)
 
     def parse_block(self, index: int, indent: int) -> tuple[list[Any], int]:
         statements: list[Any] = []
         while index < len(self.lines):
             line_no, raw_line = self.lines[index]
-            if raw_line.strip() == "":
+            stripped = raw_line.strip()
+            if stripped == "" or stripped.startswith("#"):
                 index += 1
                 continue
 
@@ -114,19 +143,45 @@ class Parser:
             if line_indent < indent:
                 break
             if line_indent > indent:
-                raise SyntaxTppError(
+                err = SyntaxTppError(
                     "Indentation looks incorrect here. This line is indented more than expected.",
                     line_no,
                     suggestion="Make sure block lines share the same indent width.",
+                    source_line=raw_line,
+                    file_path=self.file_path,
                 )
+                if self.config.collect_multiple_errors:
+                    self.diagnostics.append(err.to_diagnostic())
+                    index += 1
+                    continue
+                else:
+                    raise err
 
             stripped = raw_line.strip()
             lowered = stripped.lower()
-            if lowered.startswith("but if ") or lowered == "otherwise:":
+            if (
+                lowered.startswith("but if ")
+                or lowered.startswith("otherwise if ")
+                or lowered == "otherwise:"
+                or lowered.startswith("handle ")
+                or lowered == "finally:"
+            ):
                 break
 
-            statement, index = self.parse_statement(index, indent)
-            statements.append(statement)
+            try:
+                statement, index = self.parse_statement(index, indent)
+                statements.append(statement)
+            except SyntaxTppError as e:
+                if e.source_line is None:
+                    e.source_line = raw_line
+                if e.file_path is None:
+                    e.file_path = self.file_path
+                if self.config.collect_multiple_errors:
+                    self.diagnostics.append(e.to_diagnostic())
+                    # Synchronization recovery: skip forward to next line
+                    index += 1
+                else:
+                    raise e
 
         return statements, index
 
@@ -136,6 +191,16 @@ class Parser:
 
         if self.intent_mode:
             text = normalize_assignment_sugar(text)
+
+        # Export statements (Part 10)
+        export_match = re.match(r"^export\s+(.+)$", text, re.IGNORECASE)
+        if export_match:
+            inner_text = export_match.group(1).strip()
+            # Temporarily replace current line text to parse the exported statement
+            self.lines[index] = (line_no, " " * indent + inner_text)
+            inner_stmt, next_index = self.parse_statement(index, indent)
+            self.lines[index] = (line_no, raw_line)
+            return ExportStmt(line=line_no, statement=inner_stmt), next_index
 
         register_stmt = self.try_parse_register_keyword(text, line_no)
         if register_stmt is not None:
@@ -147,6 +212,119 @@ class Parser:
 
         text = self.apply_plugin_rewrites(text, line_no)
 
+        # --- Module Imports (Part 10) ---
+        # 1. 'use Circle and Rectangle from the "shapes" module' / 'use Circle from "shapes"'
+        use_from_match = re.match(
+            r"^use\s+(.+?)\s+from\s+(?:the\s+)?(?:module\s+)?[\"']?([A-Za-z0-9_\.\-\/]+)[\"']?(?:\s+module)?$",
+            text,
+            re.IGNORECASE,
+        )
+        if use_from_match:
+            raw_names = use_from_match.group(1).strip()
+            mod_name = use_from_match.group(2).strip()
+            name_parts = split_natural_args(raw_names)
+            names_list: list[tuple[str, Optional[str]]] = []
+            for item in name_parts:
+                alias_match = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)\s+as\s+([A-Za-z_][A-Za-z0-9_]*)$", item, re.IGNORECASE)
+                if alias_match:
+                    names_list.append((alias_match.group(1), alias_match.group(2)))
+                else:
+                    names_list.append((item.strip(), None))
+            return UseFromModuleStmt(line=line_no, module=mod_name, names=names_list), index + 1
+
+        # 2. 'from "shapes" use Circle and Rectangle'
+        from_use_match = re.match(
+            r"^from\s+[\"']?([A-Za-z0-9_\.\-\/]+)[\"']?\s+use\s+(.+)$",
+            text,
+            re.IGNORECASE,
+        )
+        if from_use_match:
+            mod_name = from_use_match.group(1).strip()
+            raw_names = from_use_match.group(2).strip()
+            name_parts = split_natural_args(raw_names)
+            names_list = []
+            for item in name_parts:
+                alias_match = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)\s+as\s+([A-Za-z_][A-Za-z0-9_]*)$", item, re.IGNORECASE)
+                if alias_match:
+                    names_list.append((alias_match.group(1), alias_match.group(2)))
+                else:
+                    names_list.append((item.strip(), None))
+            return UseFromModuleStmt(line=line_no, module=mod_name, names=names_list), index + 1
+
+        # 3. 'use the "shapes" module' / 'use "shapes"'
+        use_module_match = re.match(
+            r"^use\s+(?:the\s+)?[\"']?([A-Za-z0-9_\.\-\/]+)[\"']?(?:\s+module)?(?:\s+as\s+([A-Za-z_][A-Za-z0-9_]*))?$",
+            text,
+            re.IGNORECASE,
+        )
+        if use_module_match:
+            mod_name = use_module_match.group(1).strip()
+            alias = use_module_match.group(2)
+            return UseModuleStmt(line=line_no, module=mod_name, alias=alias), index + 1
+
+        # 4. Standard 'import ... from ...' synonym
+        import_syn_match = re.match(
+            r"^import\s+(.+?)\s+from\s+[\"']?([A-Za-z0-9_\.\-\/]+)[\"']?$",
+            text,
+            re.IGNORECASE,
+        )
+        if import_syn_match:
+            raw_names = import_syn_match.group(1).strip()
+            mod_name = import_syn_match.group(2).strip()
+            name_parts = [n.strip() for n in raw_names.split(",") if n.strip()]
+            names_list = []
+            for item in name_parts:
+                alias_match = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)\s+as\s+([A-Za-z_][A-Za-z0-9_]*)$", item, re.IGNORECASE)
+                if alias_match:
+                    names_list.append((alias_match.group(1), alias_match.group(2)))
+                else:
+                    names_list.append((item.strip(), None))
+            return UseFromModuleStmt(line=line_no, module=mod_name, names=names_list), index + 1
+
+        # --- Error Handling: Try / Handle / Finally / Raise (Part 12 & Part 1) ---
+        if re.match(r"^try:$", text, re.IGNORECASE):
+            body, next_index = self.parse_child_block(index + 1, indent, line_no)
+            handlers: list[HandleClause] = []
+            finally_body: Optional[list[Any]] = None
+
+            while True:
+                peek = self.peek_next_non_blank(next_index)
+                if peek is None:
+                    break
+                peek_index, peek_no, peek_text, peek_indent = peek
+                if peek_indent != indent:
+                    break
+
+                # 'handle DivisionError as e:' or 'handle any error as e:'
+                handle_match = re.match(
+                    r"^handle\s+(?:any\s+error|([A-Za-z_][A-Za-z0-9_]*))\s+as\s+([A-Za-z_][A-Za-z0-9_]*):$",
+                    peek_text,
+                    re.IGNORECASE,
+                )
+                if handle_match:
+                    err_type = handle_match.group(1)  # None if "any error"
+                    var_name = handle_match.group(2)
+                    h_body, next_index = self.parse_child_block(peek_index + 1, indent, peek_no)
+                    handlers.append(HandleClause(line=peek_no, error_type=err_type, var_name=var_name, body=h_body))
+                    continue
+
+                # 'finally:'
+                if re.match(r"^finally:$", peek_text, re.IGNORECASE):
+                    finally_body, next_index = self.parse_child_block(peek_index + 1, indent, peek_no)
+                    break
+                break
+
+            if not handlers and finally_body is None:
+                raise SyntaxTppError("A 'try' block must have at least one 'handle' clause or a 'finally' clause.", line_no)
+
+            return TryStmt(line=line_no, body=body, handlers=handlers, finally_body=finally_body), next_index
+
+        # 'raise the error <expr>' / 'raise <expr>' / 'throw <expr>'
+        raise_match = re.match(r"^(?:raise\s+the\s+error|raise|throw)\s+(.+)$", text, re.IGNORECASE)
+        if raise_match:
+            return RaiseStmt(line=line_no, expr=raise_match.group(1).strip()), index + 1
+
+        # --- Testing Suite / Test blocks ---
         suite_match = re.match(r"^suite\s+(.+):$", text, re.IGNORECASE)
         if suite_match:
             suite_name = parse_quoted_string(suite_match.group(1).strip(), line_no, "Suite name")
@@ -157,12 +335,14 @@ class Parser:
                 raise SyntaxTppError("A test suite may only contain test blocks.", line_no)
             return TestSuiteStmt(line=line_no, name=suite_name, tests=tests), next_index
 
-        test_match = re.match(r"^test\s+(.+):$", text, re.IGNORECASE)
-        if test_match:
-            raw_name = test_match.group(1).strip()
+        # 'test "name":' or 'test "name" expecting an error:'
+        test_exp_match = re.match(r"^test\s+(.+?)(?:\s+expecting\s+(?:an?\s+error|([A-Za-z_][A-Za-z0-9_]*)))?:$", text, re.IGNORECASE)
+        if test_exp_match:
+            raw_name = test_exp_match.group(1).strip()
+            exp_err = test_exp_match.group(2) or ("Error" if "expecting an error" in text.lower() else None)
             test_name = parse_quoted_string(raw_name, line_no, "Test name")
             body, next_index = self.parse_child_block(index + 1, indent, line_no)
-            return TestStmt(line=line_no, name=test_name, body=body), next_index
+            return TestStmt(line=line_no, name=test_name, body=body, expected_error=exp_err), next_index
 
         expect_type_match = re.match(r"^expect\s+type\s+of\s+(.+)\s+to\s+be\s+([A-Za-z_][A-Za-z0-9_]*)$", text, re.IGNORECASE)
         if expect_type_match:
@@ -206,6 +386,7 @@ class Parser:
         if fuzzy_stmt is not None:
             return fuzzy_stmt, index + 1
 
+        # GUI Stmts
         create_window_match = re.match(
             r"^create\s+window\s+titled\s+(.+?)(?:\s+as\s+([A-Za-z_][A-Za-z0-9_]*))?$",
             text,
@@ -321,11 +502,11 @@ class Parser:
                 peek_index, peek_no, peek_text, peek_indent = peek
                 if peek_indent != indent:
                     break
-                but_if_match = re.match(r"^but\s+if\s+(.+):$", peek_text, re.IGNORECASE)
+                but_if_match = re.match(r"^(?:but\s+if|otherwise\s+if)\s+(.+):$", peek_text, re.IGNORECASE)
                 if but_if_match:
                     next_condition = but_if_match.group(1).strip()
                     if not next_condition:
-                        raise SyntaxTppError("I expected a condition after 'but if'.", peek_no)
+                        raise SyntaxTppError("I expected a condition after 'otherwise if'.", peek_no)
                     next_body, next_index = self.parse_child_block(peek_index + 1, indent, peek_no)
                     branches.append((next_condition, next_body))
                     continue
@@ -335,24 +516,45 @@ class Parser:
 
             return IfStmt(line=line_no, branches=branches, else_body=else_body), next_index
 
-        while_match = re.match(r"^keep\s+doing\s+while\s+(.+):$", text, re.IGNORECASE)
+        while_match = re.match(r"^(?:keep\s+doing\s+while|while)\s+(.+):$", text, re.IGNORECASE)
         if while_match:
             condition = while_match.group(1).strip()
             body, next_index = self.parse_child_block(index + 1, indent, line_no)
             return WhileStmt(line=line_no, condition=condition, body=body), next_index
 
-        foreach_match = re.match(r"^for\s+each\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\s+(.+):$", text, re.IGNORECASE)
+        foreach_match = re.match(r"^for\s+each\s+([A-Za-z_][A-Za-z0-9_]*)(?:,\s*([A-Za-z_][A-Za-z0-9_]*))?\s+in\s+(.+):$", text, re.IGNORECASE)
         if foreach_match:
             body, next_index = self.parse_child_block(index + 1, indent, line_no)
+            if foreach_match.group(2):
+                return (
+                    ForEachStmt(
+                        line=line_no,
+                        index_var=foreach_match.group(1),
+                        var_name=foreach_match.group(2),
+                        iterable_expr=foreach_match.group(3).strip(),
+                        body=body,
+                    ),
+                    next_index,
+                )
             return (
                 ForEachStmt(
                     line=line_no,
                     var_name=foreach_match.group(1),
-                    iterable_expr=foreach_match.group(2).strip(),
+                    iterable_expr=foreach_match.group(3).strip(),
                     body=body,
                 ),
                 next_index,
             )
+
+        repeat_until_match = re.match(r"^repeat\s+until\s+(.+):$", text, re.IGNORECASE)
+        if repeat_until_match:
+            cond = repeat_until_match.group(1).strip()
+            body, next_index = self.parse_child_block(index + 1, indent, line_no)
+            return WhileStmt(line=line_no, condition=f"not ({cond})", body=body), next_index
+
+        match_stmt = self.parse_match_statement(text, index, indent)
+        if match_stmt is not None:
+            return match_stmt
 
         repeat_match = re.match(r"^repeat\s+(.+?)\s+times:$", text, re.IGNORECASE)
         if repeat_match:
@@ -377,13 +579,13 @@ class Parser:
                 next_index,
             )
 
-        if text.lower() == "stop loop":
+        if text.lower() in {"stop the loop", "stop loop", "break"}:
             return BreakStmt(line=line_no), index + 1
 
-        if text.lower() == "skip":
+        if text.lower() in {"skip to the next", "skip", "continue"}:
             return ContinueStmt(line=line_no), index + 1
 
-        if text.lower() == "do nothing":
+        if text.lower() in {"do nothing", "pass", "end"}:
             return PassStmt(line=line_no), index + 1
 
         function_stmt = self.parse_function_statement(text, index, indent)
@@ -393,7 +595,7 @@ class Parser:
         if re.match(r"^give\s+back\s+nothing$", text, re.IGNORECASE):
             return ReturnStmt(line=line_no, expr=None), index + 1
 
-        return_expr_match = re.match(r"^give\s+back\s+(.+)$", text, re.IGNORECASE)
+        return_expr_match = re.match(r"^(?:give\s+back|return)\s+(.+)$", text, re.IGNORECASE)
         if return_expr_match:
             return ReturnStmt(line=line_no, expr=return_expr_match.group(1).strip()), index + 1
 
@@ -417,6 +619,15 @@ class Parser:
 
         if re.match(r"^let\s+([A-Za-z_][A-Za-z0-9_]*)\s+be\s*$", text, re.IGNORECASE):
             raise SyntaxTppError("I expected a value after 'let'.", line_no)
+
+        # LetStmt with optional type annotation: 'let x be 4 as a number'
+        let_typed_match = re.match(r"^let\s+([A-Za-z_][A-Za-z0-9_]*)\s+be\s+(.+?)\s+as\s+(a\s+.+|an\s+.+|text|nothing|boolean|number|whole\s+number|record|list.*)$", text, re.IGNORECASE)
+        if let_typed_match:
+            var_name = let_typed_match.group(1)
+            raw_expr = let_typed_match.group(2).strip()
+            raw_type = let_typed_match.group(3).strip()
+            type_ann = parse_type_annotation(raw_type, line_no)
+            return LetStmt(line=line_no, name=var_name, expr=raw_expr, type_annotation=type_ann), index + 1
 
         let_match = re.match(r"^let\s+([A-Za-z_][A-Za-z0-9_]*)\s+be\s+(.+)$", text, re.IGNORECASE)
         if let_match:
@@ -517,7 +728,7 @@ class Parser:
                 if init_match:
                     if init_method is not None:
                         raise SyntaxTppError("Class constructor is already defined.", member_no)
-                    params = self.parse_param_text(init_match.group(1).strip(), member_no)
+                    params, _, _ = self.parse_typed_params(init_match.group(1).strip(), member_no)
                     init_body, after_init = self.parse_child_block(current + 1, class_indent, member_no)
                     init_method = FunctionDefStmt(line=member_no, name="__init__", params=params, body=init_body)
                     current = after_init
@@ -546,34 +757,129 @@ class Parser:
 
         raise self.build_unknown_statement_error(text, line_no)
 
+    def parse_match_statement(self, text: str, index: int, indent: int) -> Optional[tuple[Any, int]]:
+        match_head = re.match(r"^match\s+(.+?)(?:\s+as)?:\s*$", text, re.IGNORECASE)
+        if not match_head:
+            return None
+        line_no = self.lines[index][0]
+        expr = match_head.group(1).strip()
+        cases: list[MatchWhenClause] = []
+        otherwise_body: Optional[list[Any]] = None
+
+        child_indent, curr_idx = self.require_child_indent(index + 1, indent, line_no)
+        while curr_idx < len(self.lines):
+            peek = self.peek_next_non_blank(curr_idx)
+            if peek is None:
+                break
+            p_idx, p_no, p_text, p_indent = peek
+            if p_indent < child_indent:
+                break
+            if p_indent != child_indent:
+                raise SyntaxTppError("Inconsistent indentation in match cases.", p_no)
+
+            # 'when <pattern> [if <guard>]:'
+            when_match = re.match(r"^when\s+(.+?)(?:\s+if\s+(.+?))?(?:\s+then)?:\s*$", p_text, re.IGNORECASE)
+            if when_match:
+                pat = when_match.group(1).strip()
+                guard = when_match.group(2).strip() if when_match.group(2) else None
+                case_body, curr_idx = self.parse_child_block(p_idx + 1, p_indent, p_no)
+                cases.append(MatchWhenClause(line=p_no, pattern=pat, body=case_body, guard_expr=guard))
+                continue
+
+            if re.match(r"^(?:otherwise|else):\s*$", p_text, re.IGNORECASE):
+                otherwise_body, curr_idx = self.parse_child_block(p_idx + 1, p_indent, p_no)
+                break
+
+            raise SyntaxTppError(f"Expected 'when <pattern>:' or 'otherwise:' in match block, got '{p_text}'.", p_no)
+
+        if not cases and otherwise_body is None:
+            raise SyntaxTppError("Match block must contain at least one 'when' clause.", line_no)
+
+        return MatchStmt(line=line_no, expr=expr, cases=cases, otherwise_body=otherwise_body), curr_idx
+
     def parse_function_statement(self, text: str, index: int, indent: int) -> Optional[tuple[FunctionDefStmt, int]]:
         line_no = self.lines[index][0]
 
+        # 1. 'define <name> with <params> [, giving back <type>] [as]:'
+        fn_as_match = re.match(
+            r"^define\s+([A-Za-z_][A-Za-z0-9_]*)\s+with\s+(.+?)(?:,\s*giving\s+back\s+(.+?))?(?:\s+as)?:$",
+            text,
+            re.IGNORECASE,
+        )
+        if fn_as_match:
+            fn_name = fn_as_match.group(1)
+            raw_params = fn_as_match.group(2).strip()
+            raw_ret = fn_as_match.group(3).strip() if fn_as_match.group(3) else None
+            params, p_types, p_defaults = self.parse_typed_params(raw_params, line_no)
+            ret_type = parse_type_annotation(raw_ret, line_no) if raw_ret else None
+            body, next_index = self.parse_child_block(index + 1, indent, line_no)
+            return (
+                FunctionDefStmt(
+                    line=line_no,
+                    name=fn_name,
+                    params=params,
+                    body=body,
+                    return_type=ret_type,
+                    param_types=p_types,
+                    param_defaults=p_defaults,
+                ),
+                next_index,
+            )
+
+        # 2. 'define function <name> with <params> [, giving back <type>]:'
+        function_with_match = re.match(
+            r"^define\s+function\s+([A-Za-z_][A-Za-z0-9_]*)\s+with\s+(.+?)(?:,\s*giving\s+back\s+(.+?))?:$",
+            text,
+            re.IGNORECASE,
+        )
+        if function_with_match:
+            fn_name = function_with_match.group(1)
+            raw_params = function_with_match.group(2).strip()
+            raw_ret = function_with_match.group(3).strip() if function_with_match.group(3) else None
+            params, p_types, p_defaults = self.parse_typed_params(raw_params, line_no)
+            ret_type = parse_type_annotation(raw_ret, line_no) if raw_ret else None
+            body, next_index = self.parse_child_block(index + 1, indent, line_no)
+            return (
+                FunctionDefStmt(
+                    line=line_no,
+                    name=fn_name,
+                    params=params,
+                    body=body,
+                    return_type=ret_type,
+                    param_types=p_types,
+                    param_defaults=p_defaults,
+                ),
+                next_index,
+            )
+
+        # 3. 'define <name> that takes <params>:'
         takes_match = re.match(
             r"^define\s+([A-Za-z_][A-Za-z0-9_]*)\s+that\s+takes\s+(.+):$",
             text,
             re.IGNORECASE,
         )
         if takes_match:
-            params = self.parse_param_text(takes_match.group(2).strip(), line_no)
+            params, p_types, p_defaults = self.parse_typed_params(takes_match.group(2).strip(), line_no)
             body, next_index = self.parse_child_block(index + 1, indent, line_no)
-            return FunctionDefStmt(line=line_no, name=takes_match.group(1), params=params, body=body), next_index
+            return (
+                FunctionDefStmt(
+                    line=line_no,
+                    name=takes_match.group(1),
+                    params=params,
+                    body=body,
+                    param_types=p_types,
+                    param_defaults=p_defaults,
+                ),
+                next_index,
+            )
 
-        function_with_match = re.match(
-            r"^define\s+function\s+([A-Za-z_][A-Za-z0-9_]*)\s+with\s+(.+):$",
-            text,
-            re.IGNORECASE,
-        )
-        if function_with_match:
-            params = self.parse_param_text(function_with_match.group(2).strip(), line_no)
-            body, next_index = self.parse_child_block(index + 1, indent, line_no)
-            return FunctionDefStmt(line=line_no, name=function_with_match.group(1), params=params, body=body), next_index
-
+        # 4. 'define function <name>:'
         function_plain_match = re.match(r"^define\s+function\s+([A-Za-z_][A-Za-z0-9_]*):$", text, re.IGNORECASE)
         if function_plain_match:
             body, next_index = self.parse_child_block(index + 1, indent, line_no)
             return FunctionDefStmt(line=line_no, name=function_plain_match.group(1), params=[], body=body), next_index
 
+        # 5. 'define <name> with no inputs:'
         no_inputs_match = re.match(
             r"^define\s+([A-Za-z_][A-Za-z0-9_]*)\s+with\s+no\s+inputs:$",
             text,
@@ -585,18 +891,49 @@ class Parser:
 
         return None
 
-    def parse_param_text(self, params_text: str, line_no: int) -> list[str]:
+    def parse_typed_params(
+        self,
+        params_text: str,
+        line_no: int,
+    ) -> tuple[list[str], dict[str, TypeAnnotation | UnionTypeAnnotation], dict[str, str]]:
         lowered = params_text.lower()
         if lowered in {"no inputs", "nothing"}:
-            return []
+            return [], {}, {}
 
-        params = split_natural_args(params_text)
-        if not params:
-            return []
+        raw_parts = split_natural_args(params_text)
+        params: list[str] = []
+        param_types: dict[str, TypeAnnotation | UnionTypeAnnotation] = {}
+        param_defaults: dict[str, str] = {}
 
-        for param in params:
-            if not is_identifier(param):
-                raise SyntaxTppError(f"'{param}' is not a valid parameter name.", line_no)
+        for part in raw_parts:
+            # Pattern: '<name> as <type> defaulting to <default>'
+            p_match = re.match(
+                r"^([A-Za-z_][A-Za-z0-9_]*)(?:\s+as\s+(.+?))?(?:\s+defaulting\s+to\s+(.+))?$",
+                part.strip(),
+                re.IGNORECASE,
+            )
+            if p_match:
+                name = p_match.group(1)
+                type_str = p_match.group(2)
+                default_str = p_match.group(3)
+                if not is_identifier(name):
+                    raise SyntaxTppError(f"'{name}' is not a valid parameter name.", line_no)
+                params.append(name)
+                if type_str:
+                    ann = parse_type_annotation(type_str.strip(), line_no)
+                    if ann:
+                        param_types[name] = ann
+                if default_str:
+                    param_defaults[name] = default_str.strip()
+            else:
+                if not is_identifier(part.strip()):
+                    raise SyntaxTppError(f"'{part.strip()}' is not a valid parameter name.", line_no)
+                params.append(part.strip())
+
+        return params, param_types, param_defaults
+
+    def parse_param_text(self, params_text: str, line_no: int) -> list[str]:
+        params, _, _ = self.parse_typed_params(params_text, line_no)
         return params
 
     def parse_child_block(self, index: int, parent_indent: int, header_line: int) -> tuple[list[Any], int]:
@@ -625,11 +962,12 @@ class Parser:
         current = index
         while current < len(self.lines):
             line_no, raw = self.lines[current]
-            if raw.strip() == "":
+            stripped = raw.strip()
+            if stripped == "" or stripped.startswith("#"):
                 current += 1
                 continue
             indent = self.count_indent(raw, line_no)
-            return current, line_no, raw.strip(), indent
+            return current, line_no, stripped, indent
         return None
 
     @staticmethod
@@ -710,7 +1048,10 @@ class Parser:
             if len(raw_words) < len(phrase_words):
                 continue
             rest = " ".join(raw_words[len(phrase_words) :]).strip()
-            return template.replace("{rest}", rest).strip()
+            if "{rest}" in template or "{0}" in template:
+                res = template.replace("{rest}", rest).replace("{0}", rest)
+                return res.strip()
+            return f"{template} {rest}".strip()
         return text
 
     @staticmethod
@@ -731,6 +1072,8 @@ class Parser:
                     f"Keyword '{phrase}' is registered but has no behavior.",
                     line_no,
                     suggestion="Register it with: register keyword \"...\" as \"...\"",
+                    source_line=text,
+                    file_path=self.file_path,
                 )
 
         if "=" in stripped and all(op not in stripped for op in ("==", "!=", ">=", "<=")):
@@ -738,6 +1081,8 @@ class Parser:
                 "I expected natural assignment words.",
                 line_no,
                 suggestion="Try 'let name be value' or 'change name to value'.",
+                source_line=text,
+                file_path=self.file_path,
             )
 
         parts = stripped.split()
@@ -746,7 +1091,13 @@ class Parser:
         starters = self.statement_starters()
         suggestion = suggest_closest(first_word, starters)
         if suggestion:
-            return SyntaxTppError(f"I don't understand '{first_word}'.", line_no, suggestion=f"Did you mean '{suggestion}'?")
+            return SyntaxTppError(
+                f"I don't understand '{first_word}'.",
+                line_no,
+                suggestion=f"Did you mean '{suggestion}'?",
+                source_line=text,
+                file_path=self.file_path,
+            )
 
         assignment_shape = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)\s+.+$", stripped)
         if assignment_shape and first_word not in starters:
@@ -755,12 +1106,20 @@ class Parser:
                 f"I don't understand '{stripped}'.",
                 line_no,
                 fix_preview=f"let {variable} be ...",
+                source_line=text,
+                file_path=self.file_path,
             )
 
-        return SyntaxTppError(f"I don't understand '{stripped}'.", line_no)
+        return SyntaxTppError(
+            f"I don't understand '{stripped}'.",
+            line_no,
+            source_line=text,
+            file_path=self.file_path,
+        )
 
     def statement_starters(self) -> set[str]:
         starters = set(CORE_STATEMENT_STARTERS)
+        starters.update({"use", "export", "try", "handle", "finally", "raise", "throw", "import", "from"})
         for phrase in self.plugin_keywords:
             if phrase:
                 starters.add(phrase.split()[0])

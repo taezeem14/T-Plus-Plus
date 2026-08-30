@@ -13,6 +13,7 @@ from tpp import __version__
 from tpp.api import ApiServerConfig, serve_api
 from tpp.api.json_api import execute_json_payload_text
 from tpp.core.errors import IncompleteBlockError, render_error
+from tpp.parser.semantic import SemanticAnalyzer, SemanticConfig
 from tpp.plugins import PluginManager
 from tpp.runtime.engine import EngineConfig, RuntimeEngine
 
@@ -156,6 +157,14 @@ def _create_engine(args: argparse.Namespace, config: Optional[dict[str, Any]] = 
     if not strict_semantic:
         strict_semantic = _as_bool(config.get("strict_semantic_resolution"), False)
 
+    enforce_types = bool(getattr(args, "enforce_types", False)) or bool(getattr(args, "strict_types", False))
+    if not enforce_types:
+        enforce_types = _as_bool(config.get("enforce_types"), False) or _as_bool(config.get("strict_types"), False)
+
+    strict_types = bool(getattr(args, "strict_types", False))
+    if not strict_types:
+        strict_types = _as_bool(config.get("strict_types"), False)
+
     no_python_bridge = bool(getattr(args, "no_python_bridge", False))
     if not no_python_bridge:
         no_python_bridge = _as_bool(config.get("no_python_bridge"), False)
@@ -166,6 +175,8 @@ def _create_engine(args: argparse.Namespace, config: Optional[dict[str, Any]] = 
             debug_trace=debug_trace,
             profiling=profiling,
             strict_semantic_resolution=strict_semantic,
+            enforce_types=enforce_types,
+            strict_types=strict_types,
             allow_python_bridge=not no_python_bridge,
         )
     )
@@ -272,42 +283,9 @@ def _save_repl_history(history_path: Path) -> None:
 
 
 def _run_repl(engine: RuntimeEngine) -> int:
-    history_path = Path.cwd() / ".tpp_history"
-    _setup_repl_history(history_path)
-
-    print(_paint(f"T++ Interactive Shell v{__version__}", CliStyle.BOLD))
-    print(_paint("Type 'exit' to quit", CliStyle.DIM))
-
-    buffer: list[str] = []
-    while True:
-        prompt = _paint(">> ", CliStyle.CYAN) if not buffer else _paint(".. ", CliStyle.YELLOW)
-        try:
-            line = input(prompt)
-        except EOFError:
-            print()
-            _save_repl_history(history_path)
-            return 0
-
-        if not buffer and line.strip().lower() == "exit":
-            _save_repl_history(history_path)
-            return 0
-
-        if not buffer and line.strip() == "":
-            continue
-
-        buffer.append(line)
-        source = "\n".join(buffer)
-
-        try:
-            engine.run_source(source, repl_mode=True)
-        except IncompleteBlockError:
-            continue
-        except Exception as exc:
-            _print_error(render_error(exc, debug_trace=engine.config.debug_trace))
-            buffer.clear()
-            continue
-
-        buffer.clear()
+    from tpp.cli.repl import ReplSession
+    session = ReplSession(engine=engine)
+    return session.run_interactive()
 
 
 def _run_doctor(_args: argparse.Namespace, config: dict[str, Any]) -> int:
@@ -427,8 +405,75 @@ def _discover_test_files(base: Path) -> list[Path]:
     return files
 
 
+def _run_check(args: argparse.Namespace, config: dict[str, Any]) -> int:
+    path = Path(args.file)
+    if not path.exists():
+        _print_error(f"File '{path}' does not exist.")
+        return 1
+    try:
+        source = path.read_text(encoding="utf-8")
+        engine = _create_engine(args, config)
+        program = engine.parse_source(source, file_path=str(path.resolve()))
+        analyzer = SemanticAnalyzer(SemanticConfig(strict_types=getattr(args, "strict_types", False)))
+        analyzer.analyze(program)
+        _print_ok(f"Syntax and semantics are valid for {path}")
+        return 0
+    except Exception as exc:
+        _print_error(render_error(exc, debug_trace=getattr(args, "debug_trace", False)))
+        return 1
+
+
+def _run_fmt(args: argparse.Namespace) -> int:
+    from tpp.tools.formatter import format_file
+    path = Path(args.file)
+    if not path.exists():
+        _print_error(f"File '{path}' does not exist.")
+        return 1
+
+    check_only = getattr(args, "check", False)
+    is_modified, _ = format_file(path, check_only=check_only)
+    if check_only:
+        if is_modified:
+            _print_warn(f"File '{path}' would be reformatted.")
+            return 1
+        _print_ok(f"File '{path}' is correctly formatted.")
+        return 0
+
+    if is_modified:
+        _print_ok(f"Formatted {path}")
+    else:
+        _print_info(f"File '{path}' is already formatted.")
+    return 0
+
+
+def _run_doc(args: argparse.Namespace) -> int:
+    from tpp.tools.docgen import generate_docs_for_source, generate_docs_for_stdlib
+    target_path = Path(args.target)
+    if target_path.exists() and target_path.is_file():
+        source = target_path.read_text(encoding="utf-8")
+        doc = generate_docs_for_source(source, title=target_path.stem)
+    else:
+        doc = generate_docs_for_stdlib(args.target)
+
+    output_path = getattr(args, "output", None)
+    if output_path:
+        out_p = Path(output_path)
+        out_p.parent.mkdir(parents=True, exist_ok=True)
+        out_p.write_text(doc, encoding="utf-8")
+        _print_ok(f"Documentation written to {out_p}")
+        return 0
+
+    print(doc)
+    return 0
+
+
+def _run_lsp(args: argparse.Namespace) -> int:
+    from tpp.lsp.server import run_lsp_server
+    return run_lsp_server(stdio=getattr(args, "stdio", True), port=getattr(args, "port", None))
+
+
 def _run_test_mode(args: argparse.Namespace, config: dict[str, Any]) -> int:
-    file_paths = [Path(args.file)] if args.file else _discover_test_files(Path.cwd())
+    file_paths = [Path(args.file)] if getattr(args, "file", None) else _discover_test_files(Path.cwd())
     if not file_paths:
         _print_error("No .tpp files found for testing.")
         return 1
@@ -436,6 +481,8 @@ def _run_test_mode(args: argparse.Namespace, config: dict[str, Any]) -> int:
     total_passed = 0
     total_failed = 0
     files_with_tests = 0
+    all_results: list[Any] = []
+    filter_pat = getattr(args, "filter_pattern", None)
 
     for file_path in file_paths:
         try:
@@ -457,10 +504,19 @@ def _run_test_mode(args: argparse.Namespace, config: dict[str, Any]) -> int:
         if not tests:
             continue
 
-        files_with_tests += 1
-        results, passed, failed = engine.run_tests(program, verbose=False)
+        if filter_pat:
+            tests = [t for t in tests if filter_pat.lower() in t.name.lower()]
+            if not tests:
+                continue
 
-        if args.test_verbose:
+        files_with_tests += 1
+        results, passed, failed = engine.run_tests(program, verbose=False, filter_pattern=filter_pat)
+        all_results.extend(results)
+
+        if getattr(args, "as_json", False):
+            continue
+
+        if getattr(args, "test_verbose", False):
             for result in results:
                 badge = _paint("PASS", CliStyle.GREEN) if result.passed else _paint("FAIL", CliStyle.RED)
                 print(f"[{badge}] {result.name} ({result.duration_ms:.1f} ms)")
@@ -474,6 +530,16 @@ def _run_test_mode(args: argparse.Namespace, config: dict[str, Any]) -> int:
         total_passed += passed
         total_failed += failed
 
+    if getattr(args, "as_json", False):
+        import dataclasses
+        print(json.dumps([dataclasses.asdict(r) for r in all_results], indent=2))
+        return 0 if total_failed == 0 else 1
+
+    junit_path = getattr(args, "junit", None)
+    if junit_path:
+        _write_junit_report(all_results, Path(junit_path))
+        _print_ok(f"Wrote JUnit test report to {junit_path}")
+
     if files_with_tests == 0:
         _print_warn('No test blocks found. Add tests with: test "name":')
         return 1
@@ -484,6 +550,24 @@ def _run_test_mode(args: argparse.Namespace, config: dict[str, Any]) -> int:
     else:
         _print_ok(total_line)
     return 0 if total_failed == 0 else 1
+
+
+def _write_junit_report(results: list[Any], output_path: Path) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    xml_lines = ['<?xml version="1.0" encoding="UTF-8"?>']
+    total = len(results)
+    failures = sum(1 for r in results if not r.passed)
+    total_time = sum(r.duration_ms for r in results) / 1000.0
+    xml_lines.append(f'<testsuite name="TPPTests" tests="{total}" failures="{failures}" time="{total_time:.3f}">')
+    for r in results:
+        time_s = r.duration_ms / 1000.0
+        xml_lines.append(f'  <testcase name="{r.name}" time="{time_s:.3f}">')
+        if not r.passed:
+            det = r.details or "Test assertion failed."
+            xml_lines.append(f'    <failure message="Assertion Failed">{det}</failure>')
+        xml_lines.append("  </testcase>")
+    xml_lines.append("</testsuite>")
+    output_path.write_text("\n".join(xml_lines), encoding="utf-8")
 
 
 def _run_manifest(args: argparse.Namespace, config: dict[str, Any]) -> int:
@@ -563,6 +647,36 @@ def _run_plugin_command(args: argparse.Namespace) -> int:
     return 1
 
 
+def _run_bench(args: argparse.Namespace) -> int:
+    try:
+        from tests.perf.benchmarks import run_benchmark_suite, save_baseline
+    except ImportError:
+        _print_error("Benchmark suite could not be imported.")
+        return 1
+
+    _print_info("Running T++ performance benchmark suite...")
+    results = run_benchmark_suite()
+
+    if getattr(args, "save_baseline", None):
+        save_baseline(results, Path(args.save_baseline))
+        _print_ok(f"Saved baseline to {args.save_baseline}")
+
+    if getattr(args, "as_json", False):
+        import dataclasses
+        print(json.dumps([dataclasses.asdict(r) for r in results], indent=2))
+        return 0
+
+    divider = "-" * 64
+    print(divider)
+    print(f"{'Benchmark Name':<28} {'Avg Duration':<16} {'Throughput':<16}")
+    print(divider)
+    for r in results:
+        print(f"{r.name:<28} {r.avg_ms:>8.2f} ms/run   {r.ops_per_sec:>8.1f} ops/sec")
+    print(divider)
+    _print_ok("Benchmark suite completed successfully.")
+    return 0
+
+
 def _build_modern_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="tpp", description="T++ language platform")
     parser.add_argument("--version", action="store_true", help="Print version")
@@ -574,6 +688,8 @@ def _build_modern_parser() -> argparse.ArgumentParser:
     common.add_argument("--debug-trace", action="store_true", help="Show internal stack traces")
     common.add_argument("--profile", action="store_true", help="Show execution profiling summary")
     common.add_argument("--strict-semantic-resolution", action="store_true", help="Enable strict variable resolution")
+    common.add_argument("--strict-types", action="store_true", help="Enable strict type checking mode")
+    common.add_argument("--enforce-types", action="store_true", help="Enforce runtime type checking")
     common.add_argument("--no-python-bridge", action="store_true", help="Disable Python interop imports")
 
     sub = parser.add_subparsers(dest="command")
@@ -588,6 +704,24 @@ def _build_modern_parser() -> argparse.ArgumentParser:
     test_parser = sub.add_parser("test", parents=[common], help="Run tests")
     test_parser.add_argument("file", nargs="?", help="Optional T++ test file")
     test_parser.add_argument("--test-verbose", action="store_true", help="Verbose test output")
+    test_parser.add_argument("--json", action="store_true", dest="as_json", help="Output test results as JSON")
+    test_parser.add_argument("--junit", help="Path to write JUnit XML test report")
+    test_parser.add_argument("--filter", dest="filter_pattern", help="Filter tests by name pattern")
+
+    check_parser = sub.add_parser("check", parents=[common], help="Statically check syntax and types")
+    check_parser.add_argument("file", help="T++ source file to check")
+
+    fmt_parser = sub.add_parser("fmt", help="Format T++ source code")
+    fmt_parser.add_argument("file", help="T++ source file to format")
+    fmt_parser.add_argument("--check", action="store_true", help="Check formatting without modifying file")
+
+    doc_parser = sub.add_parser("doc", help="Generate Markdown documentation")
+    doc_parser.add_argument("target", help="Source file or stdlib module name")
+    doc_parser.add_argument("-o", "--output", help="Write markdown to output file")
+
+    lsp_parser = sub.add_parser("lsp", help="Run Language Server Protocol (LSP) server")
+    lsp_parser.add_argument("--stdio", action="store_true", default=True, help="Run LSP over stdio (default)")
+    lsp_parser.add_argument("--port", type=int, help="Run LSP over TCP port")
 
     doctor_parser = sub.add_parser("doctor", help="Run environment and installation diagnostics")
     doctor_parser.set_defaults(command="doctor")
@@ -611,6 +745,10 @@ def _build_modern_parser() -> argparse.ArgumentParser:
     api_parser.add_argument("--host", default="127.0.0.1", help="Server host")
     api_parser.add_argument("--port", type=int, default=8787, help="Server port")
     api_parser.add_argument("--debug-trace", action="store_true", help="Show internal stack traces")
+
+    bench_parser = sub.add_parser("bench", help="Run runtime performance benchmark suite")
+    bench_parser.add_argument("--json", action="store_true", dest="as_json", help="Output benchmark results as JSON")
+    bench_parser.add_argument("--save-baseline", help="Save results to baseline JSON file")
 
     return parser
 
@@ -644,6 +782,18 @@ def _run_modern_cli(argv: list[str], config: dict[str, Any]) -> int:
     if args.command == "test":
         return _run_test_mode(args, config)
 
+    if args.command == "check":
+        return _run_check(args, config)
+
+    if args.command == "fmt":
+        return _run_fmt(args)
+
+    if args.command == "doc":
+        return _run_doc(args)
+
+    if args.command == "lsp":
+        return _run_lsp(args)
+
     if args.command == "doctor":
         return _run_doctor(args, config)
 
@@ -655,6 +805,9 @@ def _run_modern_cli(argv: list[str], config: dict[str, Any]) -> int:
 
     if args.command == "api":
         return _run_api_command(args)
+
+    if args.command == "bench":
+        return _run_bench(args)
 
     parser.print_help()
     return 1
@@ -673,6 +826,8 @@ def _build_legacy_parser() -> argparse.ArgumentParser:
     parser.add_argument("--debug-trace", action="store_true", help="Show internal stack traces")
     parser.add_argument("--profile", action="store_true", help="Show execution profiling summary")
     parser.add_argument("--strict-semantic-resolution", action="store_true", help="Enable strict variable resolution")
+    parser.add_argument("--strict-types", action="store_true", help="Enable strict type checking mode")
+    parser.add_argument("--enforce-types", action="store_true", help="Enforce runtime type checking")
     parser.add_argument("--no-python-bridge", action="store_true", help="Disable Python bridge imports")
     parser.add_argument("--no-banner", action="store_true", help="Disable runtime credit banner")
     parser.add_argument("--doctor", action="store_true", help="Run environment and installation diagnostics")
@@ -715,7 +870,20 @@ def main(argv: Optional[list[str]] = None) -> int:
     argv = argv if argv is not None else sys.argv
     config = _load_config_file()
 
-    commands = {"run", "repl", "test", "plugin", "ide-manifest", "api", "doctor"}
+    commands = {
+        "run",
+        "repl",
+        "test",
+        "check",
+        "fmt",
+        "doc",
+        "lsp",
+        "plugin",
+        "ide-manifest",
+        "api",
+        "doctor",
+        "bench",
+    }
     if len(argv) > 1 and (argv[1] in commands or argv[1] in {"-h", "--help"}):
         return _run_modern_cli(argv[1:], config)
 

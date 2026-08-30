@@ -1,0 +1,17 @@
+{
+  "manifest_version": 1,
+  "name": "data_analytics",
+  "version": "1.0.0",
+  "description": "Extends T++ with specialized financial and analytics operations",
+  "author": "T++ Core Team",
+  "permissions": [
+    "filesystem_read"
+  ],
+  "dependencies": [],
+  "keywords": [
+    {
+      "phrase": "compute growth",
+      "template": "let growth be ({1} - {0}) / {0}"
+    }
+  ]
+}

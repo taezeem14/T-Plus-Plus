@@ -1,10 +1,15 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Callable, Optional
+from dataclasses import dataclass, field
+from typing import Any, Callable, Optional, TYPE_CHECKING
 
-from tpp.core.errors import RuntimeTppError, ReturnSignal
+from tpp.core.ast_nodes import TypeAnnotation, UnionTypeAnnotation
+from tpp.core.errors import ReturnSignal, RuntimeTppError, TppCallFrame
+from tpp.core.types import check_type_or_raise, is_value_compatible_with_type
 from tpp.core.utils import suggest_closest
+
+if TYPE_CHECKING:
+    from tpp.runtime.engine import RuntimeEngine
 
 
 class LazyValue:
@@ -23,13 +28,28 @@ class LazyValue:
 
 
 class Scope:
-    def __init__(self, parent: Optional[Scope] = None, self_obj: Optional[TppInstance] = None) -> None:
+    def __init__(
+        self,
+        parent: Optional[Scope] = None,
+        self_obj: Optional[TppInstance] = None,
+        is_module_scope: bool = False,
+    ) -> None:
         self.parent = parent
         self.values: dict[str, Any] = {}
         self.self_obj = self_obj
+        self.is_module_scope = is_module_scope
+        self.exported_names: set[str] = set()
+        self.has_explicit_exports: bool = False
 
-    def define(self, name: str, value: Any) -> None:
+    def define(self, name: str, value: Any, is_export: bool = False) -> None:
         self.values[name] = value
+        if is_export:
+            self.has_explicit_exports = True
+            self.exported_names.add(name)
+
+    def mark_export(self, name: str) -> None:
+        self.has_explicit_exports = True
+        self.exported_names.add(name)
 
     def has_in_chain(self, name: str) -> bool:
         if name in self.values:
@@ -98,29 +118,70 @@ class Scope:
 
 
 class TppFunction:
-    def __init__(self, name: str, params: list[str], body: list[Any], closure: Scope, is_method: bool = False) -> None:
+    def __init__(
+        self,
+        name: str,
+        params: list[str],
+        body: list[Any],
+        closure: Scope,
+        is_method: bool = False,
+        return_type: Optional[TypeAnnotation | UnionTypeAnnotation] = None,
+        param_types: Optional[dict[str, TypeAnnotation | UnionTypeAnnotation]] = None,
+        param_defaults: Optional[dict[str, str]] = None,
+    ) -> None:
         self.name = name
         self.params = params
         self.body = body
         self.closure = closure
         self.is_method = is_method
+        self.return_type = return_type
+        self.param_types = param_types or {}
+        self.param_defaults = param_defaults or {}
 
     def invoke(self, engine: RuntimeEngine, args: list[Any], line: int, self_obj: Optional[TppInstance] = None) -> Any:
-        if len(args) != len(self.params):
+        local_scope = Scope(parent=self.closure, self_obj=self_obj)
+
+        # Handle defaults for omitted arguments
+        eval_args = list(args)
+        if len(eval_args) < len(self.params):
+            for i in range(len(eval_args), len(self.params)):
+                p_name = self.params[i]
+                if p_name in self.param_defaults:
+                    def_expr = self.param_defaults[p_name]
+                    def_val = engine.evaluator.evaluate(def_expr, self.closure, line)
+                    eval_args.append(def_val)
+                else:
+                    break
+
+        if len(eval_args) != len(self.params):
             raise RuntimeTppError(
                 f"'{self.name}' expected {len(self.params)} arguments but got {len(args)}.",
                 line,
             )
 
-        local_scope = Scope(parent=self.closure, self_obj=self_obj)
-        for param, value in zip(self.params, args):
+        # Type checking on parameters if enabled
+        for param, value in zip(self.params, eval_args):
+            if engine.config.enforce_types and param in self.param_types:
+                check_type_or_raise(value, self.param_types[param], param, line=line)
             local_scope.define(param, value)
 
+        frame = TppCallFrame(function_name=self.name, line=line, file_path=getattr(engine, "current_file_path", None))
+        engine.call_stack.append(frame)
+
+        result = None
         try:
             engine.execute_block(self.body, local_scope)
         except ReturnSignal as signal:
-            return signal.value
-        return None
+            result = signal.value
+        finally:
+            if engine.call_stack and engine.call_stack[-1] == frame:
+                engine.call_stack.pop()
+
+        # Type checking on return value if enabled
+        if engine.config.enforce_types and self.return_type is not None:
+            check_type_or_raise(result, self.return_type, f"return value of '{self.name}'", line=line)
+
+        return result
 
 
 class BoundMethod:
@@ -160,10 +221,3 @@ class TppInstance:
         if method is not None:
             return BoundMethod(self, method)
         raise RuntimeTppError(f"'{self.klass.name}' has no member named '{name}'.", line)
-
-
-# Circular import typing helper
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from tpp.runtime.engine import RuntimeEngine

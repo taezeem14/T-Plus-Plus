@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from tpp.core.ast_nodes import Token
 from tpp.core.errors import RuntimeTppError
+from tpp.parser.synonyms import GLOBAL_SYNONYMS
 
 
 @dataclass
@@ -14,7 +15,7 @@ class LexerStats:
 
 
 class ExpressionTokenizer:
-    """Tokenizer that understands multi-word English operators."""
+    """Tokenizer that understands multi-word English operators and natural possessive access."""
 
     PHRASE_OPS: list[tuple[tuple[str, ...], str]] = [
         (("to", "the", "power", "of"), "**"),
@@ -26,6 +27,7 @@ class ExpressionTokenizer:
         (("is", "at", "least"), ">="),
         (("is", "at", "most"), "<="),
         (("is", "not", "equal", "to"), "!="),
+        (("is", "not"), "!="),
         (("is", "equal", "to"), "=="),
         (("is", "not", "in"), "not in"),
         (("is", "in"), "in"),
@@ -62,11 +64,29 @@ class ExpressionTokenizer:
         self._python_expr_cache.clear()
         self.stats = LexerStats()
 
+    def preprocess_natural_sugar(self, text: str) -> str:
+        """Preprocesses natural possessive phrases (person's name -> person.name) and between."""
+        # 1. Possessive sugar: 'person's name' or "item's is_done" -> 'person.name'
+        # Handle 's identifier
+        processed = re.sub(r"([A-Za-z0-9_\)\]])'s\s+([A-Za-z_][A-Za-z0-9_]*)", r"\1.\2", text)
+
+        # 2. Desugar 'X is between Y and Z' -> '(Y <= X <= Z)'
+        between_match = re.search(r"([A-Za-z0-9_\.\(\)]+)\s+is\s+between\s+(.+?)\s+and\s+([A-Za-z0-9_\.\(\)]+)", processed)
+        if between_match:
+            var_part = between_match.group(1).strip()
+            low_part = between_match.group(2).strip()
+            high_part = between_match.group(3).strip()
+            repl = f"({low_part} <= {var_part} <= {high_part})"
+            processed = processed[:between_match.start()] + repl + processed[between_match.end():]
+
+        return processed
+
     def tokenize(self, text: str, line: int) -> list[Token]:
+        preprocessed = self.preprocess_natural_sugar(text)
         raw: list[Token] = []
         i = 0
-        while i < len(text):
-            ch = text[i]
+        while i < len(preprocessed):
+            ch = preprocessed[i]
             if ch.isspace():
                 i += 1
                 continue
@@ -75,8 +95,8 @@ class ExpressionTokenizer:
                 quote = ch
                 i += 1
                 escaped = False
-                while i < len(text):
-                    curr = text[i]
+                while i < len(preprocessed):
+                    curr = preprocessed[i]
                     if curr == quote and not escaped:
                         i += 1
                         break
@@ -86,29 +106,33 @@ class ExpressionTokenizer:
                     i += 1
                 else:
                     raise RuntimeTppError("Unterminated string literal.", line)
-                raw.append(Token("string", text[start:i], line, start + 1))
+                raw.append(Token("string", preprocessed[start:i], line, start + 1))
                 continue
             if ch.isdigit():
                 start = i
                 has_dot = False
-                while i < len(text) and (text[i].isdigit() or (text[i] == "." and not has_dot)):
-                    if text[i] == ".":
-                        has_dot = True
+                while i < len(preprocessed) and (preprocessed[i].isdigit() or (preprocessed[i] == "." and not has_dot)):
+                    if preprocessed[i] == ".":
+                        # Lookahead: is the next character a digit?
+                        if i + 1 < len(preprocessed) and preprocessed[i + 1].isdigit():
+                            has_dot = True
+                        else:
+                            break
                     i += 1
-                raw.append(Token("number", text[start:i], line, start + 1))
+                raw.append(Token("number", preprocessed[start:i], line, start + 1))
                 continue
             if ch.isalpha() or ch == "_":
                 start = i
-                while i < len(text) and (text[i].isalnum() or text[i] == "_"):
+                while i < len(preprocessed) and (preprocessed[i].isalnum() or preprocessed[i] == "_"):
                     i += 1
-                raw.append(Token("word", text[start:i], line, start + 1))
+                raw.append(Token("word", preprocessed[start:i], line, start + 1))
                 continue
-            if text.startswith("**", i):
+            if preprocessed.startswith("**", i):
                 raw.append(Token("op", "**", line, i + 1))
                 i += 2
                 continue
-            if text.startswith(">=", i) or text.startswith("<=", i) or text.startswith("!=", i) or text.startswith("==", i):
-                raw.append(Token("op", text[i : i + 2], line, i + 1))
+            if preprocessed.startswith(">=", i) or preprocessed.startswith("<=", i) or preprocessed.startswith("!=", i) or preprocessed.startswith("==", i):
+                raw.append(Token("op", preprocessed[i : i + 2], line, i + 1))
                 i += 2
                 continue
             if ch in "+-*/%><":
@@ -152,13 +176,16 @@ class ExpressionTokenizer:
                 continue
 
             word_lower = token.value.lower()
+            syn_symbol = GLOBAL_SYNONYMS.get_symbol_for(word_lower)
             if word_lower in self.WORD_OPS:
                 merged.append(Token("op", self.WORD_OPS[word_lower], token.line, token.col))
+            elif syn_symbol is not None:
+                merged.append(Token("op", syn_symbol, token.line, token.col))
             elif word_lower == "true":
                 merged.append(Token("name", "True", token.line, token.col))
             elif word_lower == "false":
                 merged.append(Token("name", "False", token.line, token.col))
-            elif word_lower == "none":
+            elif word_lower in {"none", "nothing"}:
                 merged.append(Token("name", "None", token.line, token.col))
             else:
                 merged.append(Token("name", token.value, token.line, token.col))
@@ -181,7 +208,6 @@ class ExpressionTokenizer:
 
 def normalize_assignment_sugar(line: str) -> str:
     """Intent-mode helper for x = y syntax."""
-
     assignment = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$", line.strip())
     if assignment:
         return f"{assignment.group(1)} is like {assignment.group(2)}"

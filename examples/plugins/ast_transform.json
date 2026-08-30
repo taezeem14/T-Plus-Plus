@@ -1,0 +1,16 @@
+{
+  "manifest_version": 1,
+  "name": "auto_renamer",
+  "version": "1.0.0",
+  "description": "Demonstrates AST transform hooks by automatically aliasing functions",
+  "author": "T++ Core Team",
+  "permissions": [],
+  "dependencies": [],
+  "transforms": [
+    {
+      "type": "rename_function",
+      "from": "old_calculate",
+      "to": "calculate"
+    }
+  ]
+}
