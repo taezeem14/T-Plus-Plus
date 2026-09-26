@@ -1,6 +1,6 @@
-# T++ LANGUAGE PLATFORM — ANTIGRAVITY 2.0 MASTER UPGRADE BRIEF
+# T++ LANGUAGE PLATFORM — ENTERPRISE UPGRADE SPECIFICATION
 
-> Target runtime: Google Antigravity 2.0 (Agent Manager / CLI / SDK, Gemini-3-class models)
+> Target runtime: T++ Enterprise / Modern Edition (v3.2.0 Core Runtime & Tooling Platform)
 > Target repository: github.com/taezeem14/T-Plus-Plus
 > Target package: `tpp-language` on PyPI, current stable `3.1.3`
 > Author of record: Muhammad Taezeem Tariq Matta (taezeem14)
@@ -2584,10 +2584,10 @@ brief's work)
 
 ---
 
-# APPENDIX A — SUB-AGENT ROLE ASSIGNMENTS FOR ANTIGRAVITY ORCHESTRATION
+# APPENDIX A — SUB-AGENT ROLE ASSIGNMENTS FOR T++ ORCHESTRATION
 
-This appendix translates Parts 0–19 into concrete Antigravity Agent Manager roles, since
-Antigravity 2.0's execution model is orchestrator-plus-specialized-sub-agents rather than a
+This appendix translates Parts 0–19 into concrete orchestration roles, since
+the T++ platform execution model is orchestrator-plus-specialized-sub-agents rather than a
 single agent working sequentially through a flat task list. Adjust agent count to whatever
 your available parallelism/budget supports — this is a recommended decomposition, not a
 rigid requirement.
@@ -2895,7 +2895,7 @@ here for continuity): unary (`not`, unary minus) > `to the power of` > `times` /
 
 ---
 
-*This document is complete. Hand it to Antigravity 2.0's Agent Manager as the working task
+*This document is complete. Hand it to the orchestration manager as the working task
 brief for the T-Plus-Plus repository, following the staging order in Part 0.6 and the
 sub-agent decomposition in Appendix A. Update `docs/BRIEF.md` as work progresses — this
 document is a starting plan, not immutable scripture; where reality and this brief diverge,

@@ -1,217 +1,1689 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>T++ Web IDE</title>
+  <title>T++ Modern Web IDE & Playground</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg: #f6f8f4;
-      --panel: #ffffff;
-      --ink: #1f2d2f;
-      --muted: #5f6f70;
-      --accent: #1f8a70;
-      --accent-2: #184e77;
-      --border: #dce5df;
-      --danger: #b42318;
-      --ok: #067647;
-      --mono: "JetBrains Mono", "Consolas", monospace;
-      --sans: "Segoe UI", "Avenir", sans-serif;
+      --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      --font-mono: 'JetBrains Mono', 'Fira Code', Consolas, Monaco, monospace;
+
+      /* Dark Theme (Default) */
+      --bg-canvas: #090d16;
+      --bg-panel: rgba(15, 20, 34, 0.85);
+      --bg-surface: #141b2d;
+      --bg-hover: #1c263e;
+      --bg-active: #222e4b;
+      --border-color: rgba(255, 255, 255, 0.08);
+      --border-bright: rgba(0, 242, 254, 0.35);
+
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+
+      --accent-cyan: #00f2fe;
+      --accent-blue: #4facfe;
+      --accent-emerald: #10b981;
+      --accent-purple: #8b5cf6;
+      --accent-amber: #f59e0b;
+      --accent-rose: #f43f5e;
+
+      --primary-gradient: linear-gradient(135deg, #00f2fe 0%, #4facfe 100%);
+      --glow-accent: 0 0 24px rgba(0, 242, 254, 0.25);
+      --panel-shadow: 0 16px 40px -8px rgba(0, 0, 0, 0.6);
+
+      /* Syntax Tokens */
+      --tok-kw: #38bdf8;
+      --tok-type: #c084fc;
+      --tok-str: #34d399;
+      --tok-num: #fbbf24;
+      --tok-com: #64748b;
+      --tok-op: #f43f5e;
+      --tok-fn: #60a5fa;
+      --tok-bool: #fb923c;
     }
 
-    * { box-sizing: border-box; }
+    [data-theme="light"] {
+      --bg-canvas: #f1f5f9;
+      --bg-panel: rgba(255, 255, 255, 0.95);
+      --bg-surface: #ffffff;
+      --bg-hover: #f8fafc;
+      --bg-active: #e2e8f0;
+      --border-color: rgba(0, 0, 0, 0.09);
+      --border-bright: rgba(37, 99, 235, 0.3);
+
+      --text-main: #0f172a;
+      --text-muted: #475569;
+      --text-dim: #94a3b8;
+
+      --accent-cyan: #0284c7;
+      --accent-blue: #2563eb;
+      --accent-emerald: #059669;
+      --accent-purple: #7c3aed;
+      --accent-amber: #d97706;
+      --accent-rose: #e11d48;
+
+      --primary-gradient: linear-gradient(135deg, #2563eb 0%, #0284c7 100%);
+      --glow-accent: 0 0 20px rgba(37, 99, 235, 0.18);
+      --panel-shadow: 0 12px 32px -4px rgba(0, 0, 0, 0.08);
+
+      --tok-kw: #0284c7;
+      --tok-type: #7c3aed;
+      --tok-str: #059669;
+      --tok-num: #b45309;
+      --tok-com: #94a3b8;
+      --tok-op: #e11d48;
+      --tok-fn: #2563eb;
+      --tok-bool: #ea580c;
+    }
+
+    [data-theme="cyberpunk"] {
+      --bg-canvas: #07000e;
+      --bg-panel: rgba(22, 2, 40, 0.85);
+      --bg-surface: #1a0233;
+      --bg-hover: #290450;
+      --bg-active: #3b0673;
+      --border-color: rgba(255, 0, 128, 0.3);
+      --border-bright: rgba(0, 255, 255, 0.6);
+
+      --text-main: #ffffff;
+      --text-muted: #e2a4ff;
+      --text-dim: #8b5a9f;
+
+      --accent-cyan: #00ffff;
+      --accent-blue: #0099ff;
+      --accent-emerald: #39ff14;
+      --accent-purple: #ff007f;
+      --accent-amber: #ffe600;
+      --accent-rose: #ff0055;
+
+      --primary-gradient: linear-gradient(135deg, #ff007f 0%, #00ffff 100%);
+      --glow-accent: 0 0 28px rgba(255, 0, 128, 0.5);
+      --panel-shadow: 0 16px 40px -8px rgba(255, 0, 128, 0.25);
+
+      --tok-kw: #00ffff;
+      --tok-type: #ff007f;
+      --tok-str: #39ff14;
+      --tok-num: #ffe600;
+      --tok-com: #8b5a9f;
+      --tok-op: #ff0055;
+      --tok-fn: #00e5ff;
+      --tok-bool: #ff7700;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
 
     body {
-      margin: 0;
-      font-family: var(--sans);
-      color: var(--ink);
-      background:
-        radial-gradient(circle at 10% 0%, #d9efe7 0, transparent 40%),
-        radial-gradient(circle at 90% 100%, #d8e7f4 0, transparent 42%),
-        var(--bg);
+      font-family: var(--font-sans);
+      background-color: var(--bg-canvas);
+      color: var(--text-main);
       min-height: 100vh;
-      display: grid;
-      place-items: center;
-      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      overflow-x: hidden;
+      background-image:
+        radial-gradient(circle at 10% 15%, rgba(0, 242, 254, 0.05) 0%, transparent 40%),
+        radial-gradient(circle at 90% 85%, rgba(139, 92, 246, 0.06) 0%, transparent 45%);
     }
 
-    .app {
-      width: min(100%, 1080px);
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 18px;
-      box-shadow: 0 18px 50px rgba(16, 24, 40, 0.12);
+    /* Top Navigation Bar */
+    header.topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 10px 20px;
+      background: var(--bg-panel);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--border-color);
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+      z-index: 100;
+      flex-wrap: wrap;
+    }
+
+    .brand-section {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .logo-badge {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 38px;
+      height: 38px;
+      background: var(--primary-gradient);
+      border-radius: 10px;
+      box-shadow: var(--glow-accent);
+      color: #000;
+      font-weight: 800;
+      font-size: 18px;
+      letter-spacing: -0.5px;
+    }
+
+    .brand-text {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .brand-title {
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: -0.2px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .brand-badge {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 7px;
+      border-radius: 12px;
+      background: rgba(0, 242, 254, 0.12);
+      color: var(--accent-cyan);
+      border: 1px solid rgba(0, 242, 254, 0.3);
+    }
+
+    .live-status {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent-emerald);
+      box-shadow: 0 0 8px var(--accent-emerald);
+      animation: pulse 2s infinite ease-in-out;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(0.85); }
+    }
+
+    /* Top Controls */
+    .top-controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .control-group {
+      display: flex;
+      align-items: center;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 2px 6px;
+      gap: 6px;
+    }
+
+    .control-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding-left: 4px;
+    }
+
+    select, button.control-btn {
+      font-family: var(--font-sans);
+      font-size: 13px;
+      color: var(--text-main);
+      background: transparent;
+      border: none;
+      outline: none;
+      padding: 6px 10px;
+      cursor: pointer;
+      border-radius: 6px;
+      transition: all 0.15s ease;
+    }
+
+    select {
+      background-color: var(--bg-surface);
+      color: var(--text-main);
+    }
+
+    select option {
+      background: var(--bg-surface);
+      color: var(--text-main);
+    }
+
+    .toggle-btn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 6px 12px;
+      border-radius: 6px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .toggle-btn.active {
+      background: rgba(16, 185, 129, 0.15);
+      border-color: var(--accent-emerald);
+      color: var(--accent-emerald);
+      box-shadow: 0 0 12px rgba(16, 185, 129, 0.2);
+    }
+
+    /* Action Bar */
+    .action-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 8px 20px;
+      background: rgba(15, 20, 34, 0.6);
+      border-bottom: 1px solid var(--border-color);
+      flex-wrap: wrap;
+    }
+
+    .action-buttons {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      font-family: var(--font-sans);
+      font-size: 13px;
+      font-weight: 600;
+      padding: 7px 14px;
+      border-radius: 8px;
+      border: 1px solid var(--border-color);
+      background: var(--bg-surface);
+      color: var(--text-main);
+      cursor: pointer;
+      transition: all 0.15s ease;
+      user-select: none;
+    }
+
+    .btn:hover {
+      background: var(--bg-hover);
+      border-color: var(--border-bright);
+      transform: translateY(-1px);
+    }
+
+    .btn:active {
+      transform: translateY(0);
+    }
+
+    .btn-primary {
+      background: var(--primary-gradient);
+      color: #000;
+      border: none;
+      font-weight: 700;
+      box-shadow: var(--glow-accent);
+    }
+
+    .btn-primary:hover {
+      filter: brightness(1.1);
+      box-shadow: 0 0 28px rgba(0, 242, 254, 0.4);
+    }
+
+    .btn-check {
+      color: var(--accent-emerald);
+      border-color: rgba(16, 185, 129, 0.3);
+      background: rgba(16, 185, 129, 0.08);
+    }
+
+    .btn-check:hover {
+      background: rgba(16, 185, 129, 0.18);
+    }
+
+    .btn-fmt {
+      color: var(--accent-purple);
+      border-color: rgba(139, 92, 246, 0.3);
+      background: rgba(139, 92, 246, 0.08);
+    }
+
+    .btn-fmt:hover {
+      background: rgba(139, 92, 246, 0.18);
+    }
+
+    .kbd-hint {
+      font-size: 10px;
+      padding: 2px 5px;
+      border-radius: 4px;
+      background: rgba(0, 0, 0, 0.25);
+      color: inherit;
+      opacity: 0.75;
+      font-family: var(--font-mono);
+      font-weight: 500;
+    }
+
+    /* Workspace Layout */
+    .workspace {
+      display: grid;
+      grid-template-columns: 1.15fr 1fr;
+      flex: 1;
+      height: calc(100vh - 110px);
       overflow: hidden;
     }
 
-    .topbar {
+    @media (max-width: 960px) {
+      .workspace {
+        grid-template-columns: 1fr;
+        height: auto;
+      }
+    }
+
+    /* Editor Pane */
+    .editor-pane {
+      display: flex;
+      flex-direction: column;
+      border-right: 1px solid var(--border-color);
+      background: var(--bg-surface);
+      overflow: hidden;
+      position: relative;
+    }
+
+    .pane-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 14px 18px;
-      border-bottom: 1px solid var(--border);
-      background: linear-gradient(90deg, rgba(31, 138, 112, 0.1), rgba(24, 78, 119, 0.06));
+      padding: 8px 16px;
+      background: var(--bg-panel);
+      border-bottom: 1px solid var(--border-color);
+      font-size: 12px;
+      color: var(--text-muted);
     }
 
-    .title {
-      font-weight: 700;
-      letter-spacing: 0.2px;
-    }
-
-    .title small {
-      color: var(--muted);
-      font-weight: 500;
-      margin-left: 8px;
-    }
-
-    .controls {
+    .file-tab {
       display: flex;
-      gap: 10px;
       align-items: center;
+      gap: 6px;
+      font-weight: 600;
+      color: var(--text-main);
     }
 
-    select, button {
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      background: #fff;
-      color: var(--ink);
-      padding: 8px 12px;
-      font-size: 14px;
-      cursor: pointer;
+    .editor-stats {
+      display: flex;
+      gap: 12px;
+      font-family: var(--font-mono);
+      font-size: 11px;
     }
 
-    button.primary {
-      background: linear-gradient(135deg, var(--accent), var(--accent-2));
-      color: #fff;
+    .editor-container {
+      display: flex;
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+      background: var(--bg-canvas);
+    }
+
+    .gutter {
+      width: 48px;
+      padding: 16px 0;
+      background: var(--bg-surface);
+      border-right: 1px solid var(--border-color);
+      font-family: var(--font-mono);
+      font-size: 13px;
+      line-height: 1.6;
+      color: var(--text-dim);
+      text-align: right;
+      user-select: none;
+      overflow: hidden;
+    }
+
+    .gutter-line {
+      padding-right: 12px;
+      height: 20.8px;
+      position: relative;
+    }
+
+    .gutter-line.has-error::after {
+      content: '';
+      position: absolute;
+      left: 4px;
+      top: 6px;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent-rose);
+      box-shadow: 0 0 8px var(--accent-rose);
+    }
+
+    .code-viewport {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .highlight-layer {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      padding: 16px;
+      margin: 0;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      line-height: 1.6;
+      white-space: pre;
+      overflow: hidden;
+      pointer-events: none;
+      color: var(--text-main);
+    }
+
+    .code-input {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      padding: 16px;
+      margin: 0;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      line-height: 1.6;
+      color: transparent;
+      background: transparent;
+      caret-color: var(--accent-cyan);
       border: none;
+      outline: none;
+      resize: none;
+      white-space: pre;
+      overflow: auto;
+      tab-size: 4;
+      z-index: 10;
+    }
+
+    /* Diagnostics Banner */
+    .diagnostic-bar {
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 8px 16px;
+      background: rgba(244, 63, 94, 0.12);
+      border-top: 1px solid rgba(244, 63, 94, 0.3);
+      color: #fda4af;
+      font-size: 12px;
+    }
+
+    .diagnostic-bar.active {
+      display: flex;
+    }
+
+    .diagnostic-text {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* Output Pane */
+    .output-pane {
+      display: flex;
+      flex-direction: column;
+      background: var(--bg-panel);
+      overflow: hidden;
+    }
+
+    .tabs-bar {
+      display: flex;
+      align-items: center;
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border-color);
+      padding: 0 8px;
+      gap: 2px;
+    }
+
+    .tab-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 10px 14px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      position: relative;
+      transition: all 0.15s ease;
+      border-bottom: 2px solid transparent;
+    }
+
+    .tab-btn:hover {
+      color: var(--text-main);
+    }
+
+    .tab-btn.active {
+      color: var(--accent-cyan);
+      border-bottom-color: var(--accent-cyan);
+      background: rgba(0, 242, 254, 0.04);
+    }
+
+    .tab-badge {
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 10px;
+      background: var(--bg-canvas);
+      color: var(--text-muted);
+    }
+
+    .tab-content {
+      display: none;
+      flex: 1;
+      overflow: auto;
+      padding: 16px;
+      position: relative;
+    }
+
+    .tab-content.active {
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Terminal Console */
+    .terminal-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .badge-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-family: var(--font-mono);
+    }
+
+    .badge-pill.status-ok {
+      background: rgba(16, 185, 129, 0.15);
+      color: var(--accent-emerald);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+    }
+
+    .badge-pill.status-err {
+      background: rgba(244, 63, 94, 0.15);
+      color: var(--accent-rose);
+      border: 1px solid rgba(244, 63, 94, 0.3);
+    }
+
+    .badge-pill.duration {
+      background: rgba(0, 242, 254, 0.1);
+      color: var(--accent-cyan);
+      border: 1px solid rgba(0, 242, 254, 0.25);
+    }
+
+    .terminal-box {
+      flex: 1;
+      background: var(--bg-canvas);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 14px;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      line-height: 1.5;
+      color: var(--text-main);
+      white-space: pre-wrap;
+      word-break: break-all;
+      overflow-y: auto;
+    }
+
+    /* AST Visualizer */
+    .ast-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .ast-search {
+      flex: 1;
+      max-width: 260px;
+      padding: 6px 12px;
+      border-radius: 6px;
+      background: var(--bg-canvas);
+      border: 1px solid var(--border-color);
+      color: var(--text-main);
+      font-family: var(--font-sans);
+      font-size: 12px;
+      outline: none;
+    }
+
+    .ast-search:focus {
+      border-color: var(--border-bright);
+    }
+
+    .ast-tree-container {
+      flex: 1;
+      background: var(--bg-canvas);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 12px;
+      overflow: auto;
+      font-family: var(--font-mono);
+      font-size: 12px;
+    }
+
+    .ast-node {
+      margin-left: 14px;
+      padding-left: 8px;
+      border-left: 1px dashed rgba(255, 255, 255, 0.1);
+      margin-top: 4px;
+    }
+
+    .ast-node-header {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      cursor: pointer;
+      user-select: none;
+      transition: background 0.1s ease;
+    }
+
+    .ast-node-header:hover {
+      background: var(--bg-hover);
+    }
+
+    .ast-toggle {
+      width: 12px;
+      display: inline-block;
+      text-align: center;
+      font-size: 10px;
+      color: var(--text-dim);
+    }
+
+    .ast-type-badge {
+      font-weight: 700;
+      color: var(--accent-cyan);
+    }
+
+    .ast-line-badge {
+      font-size: 10px;
+      padding: 1px 4px;
+      border-radius: 3px;
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text-muted);
+    }
+
+    .ast-prop-preview {
+      color: var(--text-muted);
+      font-size: 11px;
+    }
+
+    /* Scope & Variables Inspector Table */
+    .table-container {
+      flex: 1;
+      background: var(--bg-canvas);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      overflow: auto;
+    }
+
+    table.var-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+      text-align: left;
+    }
+
+    table.var-table th {
+      padding: 10px 14px;
+      background: var(--bg-surface);
+      color: var(--text-dim);
+      font-weight: 600;
+      text-transform: uppercase;
+      font-size: 11px;
+      letter-spacing: 0.5px;
+      border-bottom: 1px solid var(--border-color);
+      position: sticky;
+      top: 0;
+      z-index: 2;
+    }
+
+    table.var-table td {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border-color);
+      font-family: var(--font-mono);
+      vertical-align: middle;
+    }
+
+    table.var-table tr:hover td {
+      background: var(--bg-hover);
+    }
+
+    .type-pill {
+      font-size: 11px;
+      padding: 2px 7px;
+      border-radius: 10px;
       font-weight: 600;
     }
 
-    .content {
-      display: grid;
-      grid-template-columns: 1.4fr 1fr;
-      min-height: 560px;
+    .type-number { background: rgba(251, 191, 36, 0.15); color: var(--accent-amber); }
+    .type-text { background: rgba(52, 211, 153, 0.15); color: var(--accent-emerald); }
+    .type-boolean { background: rgba(251, 146, 60, 0.15); color: #fb923c; }
+    .type-list { background: rgba(139, 92, 246, 0.15); color: var(--accent-purple); }
+    .type-record { background: rgba(0, 242, 254, 0.15); color: var(--accent-cyan); }
+    .type-other { background: rgba(255, 255, 255, 0.1); color: var(--text-muted); }
+
+    /* Stdlib Explorer */
+    .stdlib-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 14px;
+      flex-wrap: wrap;
     }
 
-    .pane {
+    .stdlib-search {
+      flex: 1;
+      padding: 8px 14px;
+      border-radius: 8px;
+      background: var(--bg-canvas);
+      border: 1px solid var(--border-color);
+      color: var(--text-main);
+      font-size: 13px;
+      outline: none;
+    }
+
+    .stdlib-search:focus {
+      border-color: var(--border-bright);
+    }
+
+    .module-pills {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+    }
+
+    .mod-pill {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 4px 10px;
+      border-radius: 12px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .mod-pill:hover, .mod-pill.active {
+      background: var(--primary-gradient);
+      color: #000;
+      border-color: transparent;
+      font-weight: 700;
+    }
+
+    .stdlib-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 12px;
+      overflow-y: auto;
+      padding-bottom: 16px;
+    }
+
+    .fn-card {
+      background: var(--bg-canvas);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 12px;
       display: flex;
       flex-direction: column;
-      min-width: 0;
+      justify-content: space-between;
+      gap: 8px;
+      transition: all 0.15s ease;
     }
 
-    .pane + .pane {
-      border-left: 1px solid var(--border);
+    .fn-card:hover {
+      border-color: var(--border-bright);
+      transform: translateY(-2px);
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
     }
 
-    .pane h3 {
-      margin: 0;
-      padding: 12px 14px;
+    .fn-header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 6px;
+    }
+
+    .fn-name {
+      font-family: var(--font-mono);
       font-size: 13px;
-      text-transform: uppercase;
-      letter-spacing: 0.6px;
-      color: var(--muted);
-      border-bottom: 1px solid var(--border);
-      background: #fafcfb;
+      font-weight: 700;
+      color: var(--accent-cyan);
     }
 
-    textarea,
-    pre {
-      margin: 0;
-      padding: 16px;
-      font-family: var(--mono);
+    .fn-mod {
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text-dim);
+    }
+
+    .fn-sig {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--tok-kw);
+    }
+
+    .fn-doc {
+      font-size: 12px;
+      color: var(--text-muted);
+      line-height: 1.4;
+    }
+
+    .fn-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 6px;
+      margin-top: 4px;
+    }
+
+    .btn-insert {
+      font-size: 11px;
+      padding: 4px 8px;
+      border-radius: 6px;
+      border: 1px solid var(--border-color);
+      background: var(--bg-surface);
+      color: var(--text-main);
+      cursor: pointer;
+    }
+
+    .btn-insert:hover {
+      background: var(--bg-hover);
+      border-color: var(--accent-cyan);
+      color: var(--accent-cyan);
+    }
+
+    /* Toast Notification */
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      padding: 12px 20px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-bright);
+      color: var(--text-main);
+      border-radius: 8px;
       font-size: 13px;
-      line-height: 1.5;
-      border: none;
-      outline: none;
-      width: 100%;
-      height: 100%;
-      background: transparent;
-      color: var(--ink);
+      box-shadow: var(--panel-shadow);
+      z-index: 1000;
+      opacity: 0;
+      transform: translateY(12px);
+      transition: all 0.2s ease;
+      pointer-events: none;
     }
 
-    textarea {
-      resize: none;
+    .toast.show {
+      opacity: 1;
+      transform: translateY(0);
     }
 
-    pre {
-      white-space: pre-wrap;
-      overflow: auto;
-      background: #fcfefd;
+    /* Modal */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(4px);
+      z-index: 200;
+      align-items: center;
+      justify-content: center;
     }
 
-    .status {
+    .modal-overlay.active {
+      display: flex;
+    }
+
+    .modal-card {
+      background: var(--bg-panel);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      width: min(90%, 540px);
+      padding: 24px;
+      box-shadow: var(--panel-shadow);
+    }
+
+    .modal-title {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 12px;
       display: flex;
       justify-content: space-between;
-      gap: 10px;
-      padding: 10px 14px;
-      border-top: 1px solid var(--border);
-      background: #fafcfb;
-      color: var(--muted);
-      font-size: 13px;
+      align-items: center;
     }
 
-    .ok { color: var(--ok); font-weight: 600; }
-    .err { color: var(--danger); font-weight: 600; }
+    .modal-close {
+      cursor: pointer;
+      color: var(--text-muted);
+      border: none;
+      background: transparent;
+      font-size: 18px;
+    }
 
-    @media (max-width: 920px) {
-      .content {
-        grid-template-columns: 1fr;
-      }
+    .shortcut-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 14px;
+    }
 
-      .pane + .pane {
-        border-left: none;
-        border-top: 1px solid var(--border);
-      }
+    .shortcut-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 13px;
+      border-bottom: 1px solid var(--border-color);
+      padding-bottom: 8px;
     }
   </style>
 </head>
 <body>
-  <div class="app">
-    <div class="topbar">
-      <div class="title">T++ Web IDE <small>JSON API Runtime</small></div>
-      <div class="controls">
-        <select id="mode">
-          <option value="run" selected>Run</option>
-          <option value="test">Test</option>
-        </select>
-        <button id="sample">Load Sample</button>
-        <button id="run" class="primary">Run Code</button>
+
+  <!-- Top Bar -->
+  <header class="topbar">
+    <div class="brand-section">
+      <div class="logo-badge">T++</div>
+      <div class="brand-text">
+        <div class="brand-title">
+          T++ Playground
+          <span class="brand-badge">v2.0</span>
+        </div>
+        <div class="live-status">
+          <span class="status-dot"></span>
+          <span id="runtime-status">API Server Online</span>
+        </div>
       </div>
     </div>
 
-    <div class="content">
-      <section class="pane">
-        <h3>Editor</h3>
-        <textarea id="source">let x be 5
-increase x by 10
-say "x is" then x</textarea>
-      </section>
-      <section class="pane">
-        <h3>Output</h3>
-        <pre id="output">Ready.</pre>
-      </section>
+    <div class="top-controls">
+      <!-- Preset Examples Selector -->
+      <div class="control-group">
+        <span class="control-label">Preset:</span>
+        <select id="example-select">
+          <option value="" disabled selected>Loading examples...</option>
+        </select>
+      </div>
+
+      <!-- Execution Mode -->
+      <div class="control-group">
+        <span class="control-label">Mode:</span>
+        <select id="exec-mode">
+          <option value="run" selected>Run Script</option>
+          <option value="test">Run Test Suite</option>
+        </select>
+      </div>
+
+      <!-- Parser Mode -->
+      <div class="control-group">
+        <span class="control-label">Parser:</span>
+        <select id="parser-mode">
+          <option value="fuzzy" selected>Fuzzy (Natural)</option>
+          <option value="strict">Strict</option>
+          <option value="intent">Intent</option>
+        </select>
+      </div>
+
+      <!-- Strict Types Toggle -->
+      <button id="strict-types-toggle" class="toggle-btn" title="Toggle strict type enforcement">
+        <span>Strict Types: OFF</span>
+      </button>
+
+      <!-- Theme Switcher -->
+      <div class="control-group">
+        <span class="control-label">Theme:</span>
+        <select id="theme-select">
+          <option value="dark" selected>🌙 Dark</option>
+          <option value="light">☀️ Light</option>
+          <option value="cyberpunk">⚡ Cyberpunk</option>
+        </select>
+      </div>
+    </div>
+  </header>
+
+  <!-- Action Toolbar -->
+  <div class="action-bar">
+    <div class="action-buttons">
+      <button id="btn-run" class="btn btn-primary" title="Execute current program (Ctrl+Enter)">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+        Run Code
+        <span class="kbd-hint">Ctrl+↵</span>
+      </button>
+
+      <button id="btn-check" class="btn btn-check" title="Perform syntax & type diagnostic check (Ctrl+Shift+Enter)">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M20 6L9 17l-5-5"/></svg>
+        Check Code
+        <span class="kbd-hint">Ctrl+⇧+↵</span>
+      </button>
+
+      <button id="btn-fmt" class="btn btn-fmt" title="Format T++ source code (Ctrl+Shift+F)">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h10M4 18h14"/></svg>
+        Format
+        <span class="kbd-hint">Ctrl+⇧+F</span>
+      </button>
+
+      <button id="btn-share" class="btn" title="Copy shareable link to clipboard">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 12v8a2 2 0 002 2h12a2 2 0 002-2v-8M16 6l-4-4-4 4M12 2v13"/></svg>
+        Share
+      </button>
+
+      <button id="btn-download" class="btn" title="Download as .tpp file">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+        Download .tpp
+      </button>
+
+      <button id="btn-clear" class="btn" title="Clear console output">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+        Clear
+      </button>
     </div>
 
-    <div class="status">
-      <span id="status">Idle</span>
-      <span>Endpoint: POST /run</span>
+    <div>
+      <button id="btn-shortcuts" class="btn" style="padding: 6px 10px; font-size: 11px;">
+        ⌨️ Shortcuts
+      </button>
+    </div>
+  </div>
+
+  <!-- Workspace -->
+  <main class="workspace">
+    <!-- Left: Code Editor Pane -->
+    <section class="editor-pane">
+      <div class="pane-header">
+        <div class="file-tab">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          main.tpp
+        </div>
+        <div class="editor-stats">
+          <span id="stat-pos">Ln 1, Col 1</span>
+          <span id="stat-lines">0 lines</span>
+          <span id="stat-chars">0 chars</span>
+        </div>
+      </div>
+
+      <div class="editor-container">
+        <div id="editor-gutter" class="gutter"></div>
+        <div class="code-viewport">
+          <pre id="highlight-layer" class="highlight-layer"><code id="highlight-code"></code></pre>
+          <textarea id="code-input" class="code-input" spellcheck="false" autocomplete="off" autocapitalize="off"></textarea>
+        </div>
+      </div>
+
+      <div id="diagnostic-bar" class="diagnostic-bar">
+        <div class="diagnostic-text">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <span id="diagnostic-msg">Syntax or type diagnostic issue</span>
+        </div>
+        <button id="btn-dismiss-diag" class="btn" style="padding: 3px 8px; font-size: 11px; background: rgba(0,0,0,0.3);">Dismiss</button>
+      </div>
+    </section>
+
+    <!-- Right: Output & Inspector Pane -->
+    <section class="output-pane">
+      <div class="tabs-bar">
+        <button class="tab-btn active" data-tab="tab-terminal">
+          🖥️ Terminal
+        </button>
+        <button class="tab-btn" data-tab="tab-ast">
+          🌳 AST Visualizer
+        </button>
+        <button class="tab-btn" data-tab="tab-scope">
+          📊 Scope & Variables
+          <span id="scope-count" class="tab-badge">0</span>
+        </button>
+        <button class="tab-btn" data-tab="tab-stdlib">
+          📚 Stdlib Explorer
+        </button>
+      </div>
+
+      <!-- Tab 1: Terminal Console -->
+      <div id="tab-terminal" class="tab-content active">
+        <div class="terminal-meta">
+          <div style="display: flex; gap: 8px;">
+            <span id="term-status" class="badge-pill status-ok">Ready</span>
+            <span id="term-duration" class="badge-pill duration" style="display: none;">⚡ 0.0 ms</span>
+          </div>
+          <div>
+            <button id="btn-copy-term" class="btn" style="padding: 4px 8px; font-size: 11px;">Copy Output</button>
+          </div>
+        </div>
+        <div id="terminal-output" class="terminal-box">T++ Runtime Ready. Press 'Run Code' or Ctrl+Enter to execute.</div>
+      </div>
+
+      <!-- Tab 2: AST Tree Visualizer -->
+      <div id="tab-ast" class="tab-content">
+        <div class="ast-toolbar">
+          <input type="text" id="ast-filter" class="ast-search" placeholder="Filter AST nodes (e.g. LetStmt)..." />
+          <div style="display: flex; gap: 6px;">
+            <button id="ast-expand-all" class="btn" style="padding: 4px 8px; font-size: 11px;">Expand All</button>
+            <button id="ast-collapse-all" class="btn" style="padding: 4px 8px; font-size: 11px;">Collapse All</button>
+            <button id="ast-copy-json" class="btn" style="padding: 4px 8px; font-size: 11px;">Copy JSON</button>
+          </div>
+        </div>
+        <div id="ast-container" class="ast-tree-container">
+          <div style="color: var(--text-dim); text-align: center; padding: 40px 0;">
+            Click "Check Code" or "Run Code" to inspect the AST structure.
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab 3: Scope & Variables Inspector -->
+      <div id="tab-scope" class="tab-content">
+        <div style="margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
+          <input type="text" id="scope-search" class="ast-search" style="max-width: 220px;" placeholder="Search variables..." />
+          <span style="font-size: 12px; color: var(--text-dim);" id="scope-meta-text">0 variables in scope</span>
+        </div>
+        <div class="table-container">
+          <table class="var-table">
+            <thead>
+              <tr>
+                <th>Variable</th>
+                <th>Type</th>
+                <th>Evaluated Value</th>
+              </tr>
+            </thead>
+            <tbody id="scope-tbody">
+              <tr>
+                <td colspan="3" style="text-align: center; color: var(--text-dim); padding: 30px 0;">
+                  No variables defined yet. Run your code to inspect evaluated variables.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Tab 4: Stdlib Explorer -->
+      <div id="tab-stdlib" class="tab-content">
+        <div class="stdlib-toolbar">
+          <input type="text" id="stdlib-search" class="stdlib-search" placeholder="Search functions or modules (e.g., 'is_prime', 'split', 'email')..." />
+        </div>
+        <div class="module-pills" id="stdlib-module-pills">
+          <span class="mod-pill active" data-mod="all">All Modules</span>
+          <span class="mod-pill" data-mod="math">math</span>
+          <span class="mod-pill" data-mod="text">text</span>
+          <span class="mod-pill" data-mod="collections">collections</span>
+          <span class="mod-pill" data-mod="system">system</span>
+          <span class="mod-pill" data-mod="time">time</span>
+          <span class="mod-pill" data-mod="json">json</span>
+          <span class="mod-pill" data-mod="validate">validate</span>
+        </div>
+        <div class="stdlib-grid" id="stdlib-cards-grid">
+          <!-- Cards injected via JS -->
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Toast Notification -->
+  <div id="toast" class="toast">Action completed!</div>
+
+  <!-- Shortcuts Modal -->
+  <div id="shortcuts-modal" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-title">
+        <span>Keyboard Shortcuts</span>
+        <button id="modal-close-btn" class="modal-close">&times;</button>
+      </div>
+      <div class="shortcut-list">
+        <div class="shortcut-item">
+          <span>Run Program</span>
+          <span class="kbd-hint">Ctrl + Enter / Cmd + Enter</span>
+        </div>
+        <div class="shortcut-item">
+          <span>Check Syntax & Types</span>
+          <span class="kbd-hint">Ctrl + Shift + Enter</span>
+        </div>
+        <div class="shortcut-item">
+          <span>Format Source Code</span>
+          <span class="kbd-hint">Ctrl + Shift + F</span>
+        </div>
+        <div class="shortcut-item">
+          <span>Indent Selection</span>
+          <span class="kbd-hint">Tab (4 spaces)</span>
+        </div>
+        <div class="shortcut-item">
+          <span>Unindent Selection</span>
+          <span class="kbd-hint">Shift + Tab</span>
+        </div>
+        <div class="shortcut-item">
+          <span>Auto Indent Block</span>
+          <span class="kbd-hint">Enter after ':' (+4 spaces)</span>
+        </div>
+      </div>
     </div>
   </div>
 
   <script>
-    const sourceEl = document.getElementById("source");
-    const outputEl = document.getElementById("output");
-    const modeEl = document.getElementById("mode");
-    const statusEl = document.getElementById("status");
+    // --- State & DOM References ---
+    const codeInput = document.getElementById("code-input");
+    const highlightCode = document.getElementById("highlight-code");
+    const highlightLayer = document.getElementById("highlight-layer");
+    const editorGutter = document.getElementById("editor-gutter");
+    const diagnosticBar = document.getElementById("diagnostic-bar");
+    const diagnosticMsg = document.getElementById("diagnostic-msg");
 
-    async function runCode() {
-      statusEl.textContent = "Running...";
-      statusEl.className = "";
-      outputEl.textContent = "";
+    const exampleSelect = document.getElementById("example-select");
+    const execMode = document.getElementById("exec-mode");
+    const parserMode = document.getElementById("parser-mode");
+    const strictTypesToggle = document.getElementById("strict-types-toggle");
+    const themeSelect = document.getElementById("theme-select");
+
+    const terminalOutput = document.getElementById("terminal-output");
+    const termStatus = document.getElementById("term-status");
+    const termDuration = document.getElementById("term-duration");
+    const astContainer = document.getElementById("ast-container");
+    const scopeTbody = document.getElementById("scope-tbody");
+    const scopeCountBadge = document.getElementById("scope-count");
+    const scopeMetaText = document.getElementById("scope-meta-text");
+    const stdlibGrid = document.getElementById("stdlib-cards-grid");
+
+    const statPos = document.getElementById("stat-pos");
+    const statLines = document.getElementById("stat-lines");
+    const statChars = document.getElementById("stat-chars");
+    const toast = document.getElementById("toast");
+
+    let strictTypesEnabled = false;
+    let catalogExamples = [];
+    let stdlibData = [];
+    let currentAstJson = null;
+    let currentScopeVariables = [];
+
+    // --- Toast Helper ---
+    function showToast(message) {
+      toast.textContent = message;
+      toast.classList.add("show");
+      setTimeout(() => toast.classList.remove("show"), 2600);
+    }
+
+    // --- Syntax Highlighter for T++ ---
+    function escapeHtml(str) {
+      return str
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    const TPP_KEYWORDS = [
+      "create class", "when created with", "when created", "give back", "for each", "stop loop",
+      "bring in", "divided by", "greater than or equal to", "less than or equal to", "greater than",
+      "less than", "equal to", "not equal to", "times", "mod", "plus", "minus", "to be between",
+      "to be", "type of", "otherwise if", "define function", "define", "let", "be", "change", "to",
+      "function", "with", "say", "then", "ask", "use", "import", "from", "export", "remember",
+      "suite", "test", "expect", "match", "when", "otherwise", "if", "repeat", "count", "while",
+      "skip", "try", "handle", "finally", "raise", "call", "on", "as", "and", "or", "not", "is",
+      "like", "where", "in", "the", "items", "containing"
+    ];
+
+    const TPP_TYPES = [
+      "whole number", "number", "text", "boolean", "nothing", "list", "record",
+      "int", "float", "str", "bool", "dict", "set", "map", "array"
+    ];
+
+    function highlightTpp(code) {
+      const lines = code.split("\n");
+      const highlightedLines = lines.map(line => {
+        if (!line) return "";
+
+        // Check for comment
+        const commentIdx = line.indexOf("#");
+        let codePart = commentIdx >= 0 ? line.slice(0, commentIdx) : line;
+        let commentPart = commentIdx >= 0 ? line.slice(commentIdx) : "";
+
+        // Tokenize codePart
+        let result = "";
+        let i = 0;
+        const len = codePart.length;
+
+        while (i < len) {
+          // String literal
+          if (codePart[i] === '"' || codePart[i] === "'") {
+            const quote = codePart[i];
+            let strLit = quote;
+            i++;
+            while (i < len && codePart[i] !== quote) {
+              if (codePart[i] === '\\' && i + 1 < len) {
+                strLit += codePart[i] + codePart[i + 1];
+                i += 2;
+              } else {
+                strLit += codePart[i];
+                i++;
+              }
+            }
+            if (i < len) {
+              strLit += codePart[i];
+              i++;
+            }
+            result += `<span style="color: var(--tok-str);">${escapeHtml(strLit)}</span>`;
+            continue;
+          }
+
+          // Number literal
+          if (/\d/.test(codePart[i])) {
+            let numLit = "";
+            while (i < len && /[\d\.]/.test(codePart[i])) {
+              numLit += codePart[i];
+              i++;
+            }
+            result += `<span style="color: var(--tok-num);">${escapeHtml(numLit)}</span>`;
+            continue;
+          }
+
+          // Identifier or Keyword
+          if (/[a-zA-Z_]/.test(codePart[i])) {
+            let word = "";
+            const start = i;
+            while (i < len && /[a-zA-Z0-9_]/.test(codePart[i])) {
+              word += codePart[i];
+              i++;
+            }
+
+            // Check multi-word phrase lookahead
+            let matchedPhrase = null;
+            for (const phrase of TPP_KEYWORDS) {
+              if (phrase.includes(" ") && phrase.startsWith(word.toLowerCase())) {
+                const remainder = phrase.slice(word.length);
+                if (codePart.slice(i, i + remainder.length).toLowerCase() === remainder) {
+                  matchedPhrase = phrase;
+                  i += remainder.length;
+                  break;
+                }
+              }
+            }
+
+            if (matchedPhrase) {
+              result += `<span style="color: var(--tok-kw); font-weight: 600;">${escapeHtml(codePart.slice(start, i))}</span>`;
+            } else if (TPP_KEYWORDS.includes(word.toLowerCase())) {
+              result += `<span style="color: var(--tok-kw); font-weight: 600;">${escapeHtml(word)}</span>`;
+            } else if (TPP_TYPES.includes(word.toLowerCase())) {
+              result += `<span style="color: var(--tok-type); font-weight: 600;">${escapeHtml(word)}</span>`;
+            } else if (["true", "false", "yes", "no", "nothing", "none"].includes(word.toLowerCase())) {
+              result += `<span style="color: var(--tok-bool); font-weight: 600;">${escapeHtml(word)}</span>`;
+            } else {
+              result += escapeHtml(word);
+            }
+            continue;
+          }
+
+          // Operators
+          if (/[:+\-*\/%=<>!&|.]/.test(codePart[i])) {
+            result += `<span style="color: var(--tok-op);">${escapeHtml(codePart[i])}</span>`;
+            i++;
+            continue;
+          }
+
+          // Whitespace & punctuation
+          result += escapeHtml(codePart[i]);
+          i++;
+        }
+
+        if (commentPart) {
+          result += `<span style="color: var(--tok-com); font-style: italic;">${escapeHtml(commentPart)}</span>`;
+        }
+
+        return result;
+      });
+
+      return highlightedLines.join("\n");
+    }
+
+    // --- Update Editor & Gutter ---
+    function updateEditor() {
+      const code = codeInput.value;
+      highlightCode.innerHTML = highlightTpp(code) + "\n ";
+
+      // Update gutter line numbers
+      const lines = code.split("\n");
+      const gutterHtml = lines.map((_, idx) => `<div class="gutter-line" data-line="${idx + 1}">${idx + 1}</div>`).join("");
+      editorGutter.innerHTML = gutterHtml;
+
+      // Stats
+      statLines.textContent = `${lines.length} lines`;
+      statChars.textContent = `${code.length} chars`;
+      updateCursorStats();
+    }
+
+    function updateCursorStats() {
+      const val = codeInput.value;
+      const selStart = codeInput.selectionStart || 0;
+      const linesUpToCursor = val.slice(0, selStart).split("\n");
+      const currentLine = linesUpToCursor.length;
+      const currentCol = linesUpToCursor[linesUpToCursor.length - 1].length + 1;
+      statPos.textContent = `Ln ${currentLine}, Col ${currentCol}`;
+    }
+
+    // Synchronize scrolling
+    function syncScroll() {
+      highlightLayer.scrollTop = codeInput.scrollTop;
+      highlightLayer.scrollLeft = codeInput.scrollLeft;
+      editorGutter.scrollTop = codeInput.scrollTop;
+    }
+
+    codeInput.addEventListener("input", () => {
+      updateEditor();
+      syncScroll();
+    });
+    codeInput.addEventListener("scroll", syncScroll);
+    codeInput.addEventListener("click", updateCursorStats);
+    codeInput.addEventListener("keyup", updateCursorStats);
+
+    // --- Keybinding & Smart Editing ---
+    codeInput.addEventListener("keydown", (e) => {
+      // Run: Ctrl+Enter or Cmd+Enter
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !e.shiftKey) {
+        e.preventDefault();
+        runProgram();
+        return;
+      }
+
+      // Check: Ctrl+Shift+Enter
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && e.shiftKey) {
+        e.preventDefault();
+        checkProgram();
+        return;
+      }
+
+      // Format: Ctrl+Shift+F
+      if ((e.key === "F" || e.key === "f") && (e.ctrlKey || e.metaKey) && e.shiftKey) {
+        e.preventDefault();
+        formatProgram();
+        return;
+      }
+
+      // Save / Download: Ctrl+S
+      if ((e.key === "s" || e.key === "S") && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        downloadTppFile();
+        return;
+      }
+
+      // Tab key indentation
+      if (e.key === "Tab") {
+        e.preventDefault();
+        const start = codeInput.selectionStart;
+        const end = codeInput.selectionEnd;
+        const value = codeInput.value;
+
+        if (e.shiftKey) {
+          // Unindent line
+          const lineStart = value.lastIndexOf("\n", start - 1) + 1;
+          const currentLine = value.slice(lineStart);
+          if (currentLine.startsWith("    ")) {
+            codeInput.value = value.slice(0, lineStart) + currentLine.slice(4);
+            codeInput.selectionStart = Math.max(lineStart, start - 4);
+            codeInput.selectionEnd = Math.max(lineStart, end - 4);
+            updateEditor();
+          }
+        } else {
+          // Insert 4 spaces
+          codeInput.value = value.substring(0, start) + "    " + value.substring(end);
+          codeInput.selectionStart = codeInput.selectionEnd = start + 4;
+          updateEditor();
+        }
+        return;
+      }
+
+      // Enter key: auto indent + 4 spaces after ':'
+      if (e.key === "Enter") {
+        e.preventDefault();
+        const start = codeInput.selectionStart;
+        const value = codeInput.value;
+        const lineStart = value.lastIndexOf("\n", start - 1) + 1;
+        const currentLine = value.slice(lineStart, start);
+
+        const indentMatch = currentLine.match(/^\s*/);
+        let indent = indentMatch ? indentMatch[0] : "";
+
+        // If line ends with ':', add 4 extra spaces
+        if (currentLine.trim().endsWith(":")) {
+          indent += "    ";
+        }
+
+        const insertText = "\n" + indent;
+        codeInput.value = value.substring(0, start) + insertText + value.substring(start);
+        codeInput.selectionStart = codeInput.selectionEnd = start + insertText.length;
+        updateEditor();
+        syncScroll();
+        return;
+      }
+
+      // Auto-close quotes and brackets
+      const pairs = { '(': ')', '[': ']', '{': '}' };
+      if (pairs[e.key]) {
+        const start = codeInput.selectionStart;
+        const end = codeInput.selectionEnd;
+        const value = codeInput.value;
+        const selected = value.substring(start, end);
+        e.preventDefault();
+        codeInput.value = value.substring(0, start) + e.key + selected + pairs[e.key] + value.substring(end);
+        codeInput.selectionStart = start + 1;
+        codeInput.selectionEnd = end + 1;
+        updateEditor();
+      }
+    });
+
+    // --- Tab Switching ---
+    document.querySelectorAll(".tab-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+        document.querySelectorAll(".tab-content").forEach(c => c.classList.remove("active"));
+        btn.classList.add("active");
+        const targetId = btn.getAttribute("data-tab");
+        const targetEl = document.getElementById(targetId);
+        if (targetEl) targetEl.classList.add("active");
+      });
+    });
+
+    // --- ANSI Color Parser ---
+    function parseAnsi(text) {
+      if (!text) return "";
+      const ansiRegex = /\u001b\[([0-9;]+)m/g;
+      let html = "";
+      let lastIndex = 0;
+      let activeColor = null;
+      let isBold = false;
+
+      const colorMap = {
+        "30": "#64748b", "31": "#f43f5e", "32": "#10b981", "33": "#f59e0b",
+        "34": "#3b82f6", "35": "#8b5cf6", "36": "#06b6d4", "37": "#f8fafc",
+        "90": "#94a3b8", "91": "#fb7185", "92": "#34d399", "93": "#fcd34d",
+        "94": "#60a5fa", "95": "#c084fc", "96": "#22d3ee", "97": "#ffffff"
+      };
+
+      let match;
+      while ((match = ansiRegex.exec(text)) !== null) {
+        const rawChunk = text.slice(lastIndex, match.index);
+        if (rawChunk) {
+          let style = "";
+          if (activeColor) style += `color: ${activeColor}; `;
+          if (isBold) style += `font-weight: 700; `;
+          html += style ? `<span style="${style}">${escapeHtml(rawChunk)}</span>` : escapeHtml(rawChunk);
+        }
+
+        const codes = match[1].split(";");
+        for (const code of codes) {
+          if (code === "0") {
+            activeColor = null;
+            isBold = false;
+          } else if (code === "1") {
+            isBold = true;
+          } else if (colorMap[code]) {
+            activeColor = colorMap[code];
+          }
+        }
+
+        lastIndex = ansiRegex.lastIndex;
+      }
+
+      const remainder = text.slice(lastIndex);
+      if (remainder) {
+        let style = "";
+        if (activeColor) style += `color: ${activeColor}; `;
+        if (isBold) style += `font-weight: 700; `;
+        html += style ? `<span style="${style}">${escapeHtml(remainder)}</span>` : escapeHtml(remainder);
+      }
+
+      return html;
+    }
+
+    // --- API Calls ---
+    async function runProgram() {
+      termStatus.textContent = "Running...";
+      termStatus.className = "badge-pill";
+      termDuration.style.display = "none";
+      diagnosticBar.classList.remove("active");
+      clearGutterErrors();
+
+      // Switch to terminal tab
+      document.querySelector('[data-tab="tab-terminal"]').click();
 
       const payload = {
-        mode: modeEl.value,
-        source: sourceEl.value,
+        mode: execMode.value,
+        source: codeInput.value,
+        parser_mode: parserMode.value,
+        strict_types: strictTypesEnabled,
       };
 
       try {
@@ -222,43 +1694,565 @@ say "x is" then x</textarea>
         });
 
         const data = await res.json();
-        if (!res.ok || !data.ok) {
-          statusEl.textContent = "Error";
-          statusEl.className = "err";
-          outputEl.textContent = data.error || JSON.stringify(data, null, 2);
-          return;
+        const duration = data.duration_ms !== undefined ? `${data.duration_ms} ms` : "0.0 ms";
+        termDuration.textContent = `⚡ ${duration}`;
+        termDuration.style.display = "inline-flex";
+
+        if (!data.ok) {
+          termStatus.textContent = "Error";
+          termStatus.className = "badge-pill status-err";
+          terminalOutput.innerHTML = parseAnsi(data.error || JSON.stringify(data, null, 2));
+
+          if (data.line) {
+            highlightGutterError(data.line);
+            showDiagnostic(data.line, data.error || "Execution error", data.hint);
+          }
+        } else {
+          termStatus.textContent = "Success";
+          termStatus.className = "badge-pill status-ok";
+
+          let outputContent = "";
+          if (data.stdout) {
+            outputContent += parseAnsi(data.stdout);
+          }
+          if (data.summary) {
+            outputContent += `\n\n[Test Results] Passed: ${data.summary.passed}, Failed: ${data.summary.failed}\n`;
+            if (data.tests) {
+              data.tests.forEach(t => {
+                const icon = t.passed ? "✓ PASS" : "✗ FAIL";
+                outputContent += `  ${icon}: ${t.name} (${t.duration_ms}ms)\n`;
+              });
+            }
+          }
+          terminalOutput.innerHTML = outputContent || "(Execution finished with no output)";
         }
 
-        statusEl.textContent = "Success";
-        statusEl.className = "ok";
+        // Populate scope variables
+        if (data.variables) {
+          updateScopeTable(data.variables);
+        }
 
-        const parts = [];
-        if (data.stdout) {
-          parts.push(data.stdout.trimEnd());
-        }
-        if (data.summary) {
-          parts.push(`Tests: ${data.summary.passed} passed, ${data.summary.failed} failed`);
-        }
-        if (data.tests) {
-          parts.push(JSON.stringify(data.tests, null, 2));
-        }
-        outputEl.textContent = parts.join("\n\n") || "(no output)";
+        // Automatically refresh AST in background
+        fetchAst();
+
       } catch (err) {
-        statusEl.textContent = "Connection Error";
-        statusEl.className = "err";
-        outputEl.textContent = String(err);
+        termStatus.textContent = "Network Error";
+        termStatus.className = "badge-pill status-err";
+        terminalOutput.textContent = `Failed to connect to T++ API server: ${err.message}`;
       }
     }
 
-    document.getElementById("run").addEventListener("click", runCode);
+    async function checkProgram() {
+      termStatus.textContent = "Checking...";
+      termStatus.className = "badge-pill";
+      clearGutterErrors();
+      diagnosticBar.classList.remove("active");
 
-    document.getElementById("sample").addEventListener("click", () => {
-      sourceEl.value = `suite "sample suite":
-    test "addition":
-        expect 2 plus 3 to be 5
+      const payload = {
+        source: codeInput.value,
+        parser_mode: parserMode.value,
+        strict_types: strictTypesEnabled,
+      };
 
-let name be "T++"
-say "hello" then name`;
+      try {
+        const res = await fetch("/check", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        const data = await res.json();
+        if (data.ok && data.diagnostics.length === 0) {
+          termStatus.textContent = "Valid";
+          termStatus.className = "badge-pill status-ok";
+          showToast("✓ Syntax and semantics verified: No errors found!");
+        } else {
+          termStatus.textContent = `${data.diagnostics.length} Diagnostic(s)`;
+          termStatus.className = "badge-pill status-err";
+
+          data.diagnostics.forEach(diag => {
+            highlightGutterError(diag.line);
+            showDiagnostic(diag.line, diag.message, diag.hint);
+          });
+
+          // Print diagnostics to terminal
+          const diagLines = data.diagnostics.map(d =>
+            `Line ${d.line}, Col ${d.column}: ${d.message}${d.hint ? `\n  Hint: ${d.hint}` : ""}`
+          ).join("\n\n");
+          terminalOutput.textContent = `Diagnostics Found:\n\n${diagLines}`;
+          document.querySelector('[data-tab="tab-terminal"]').click();
+        }
+
+        fetchAst();
+      } catch (err) {
+        showToast(`Diagnostic check failed: ${err.message}`);
+      }
+    }
+
+    async function formatProgram() {
+      const payload = { source: codeInput.value };
+      try {
+        const res = await fetch("/fmt", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        const data = await res.json();
+        if (data.ok) {
+          if (data.modified) {
+            codeInput.value = data.formatted;
+            updateEditor();
+            showToast("✨ Code successfully formatted!");
+          } else {
+            showToast("Code is already canonically formatted.");
+          }
+        } else {
+          showToast(`Format error: ${data.error}`);
+        }
+      } catch (err) {
+        showToast(`Formatting request failed: ${err.message}`);
+      }
+    }
+
+    async function fetchAst() {
+      try {
+        const res = await fetch("/ast", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            source: codeInput.value,
+            parser_mode: parserMode.value,
+          }),
+        });
+        const data = await res.json();
+        if (data.ok && data.ast) {
+          currentAstJson = data.ast;
+          renderAstTree(data.ast);
+        } else {
+          astContainer.innerHTML = `<div style="color: var(--accent-rose); padding: 12px;">Failed parsing AST: ${escapeHtml(data.error || "Unknown error")}</div>`;
+        }
+      } catch (err) {
+        // Silently handle background AST failure
+      }
+    }
+
+    // --- AST Tree Interactive Visualizer ---
+    function renderAstTree(node, filterText = "") {
+      astContainer.innerHTML = "";
+      const rootEl = createAstNodeElement("Program", node, true, filterText.toLowerCase());
+      astContainer.appendChild(rootEl);
+    }
+
+    function createAstNodeElement(key, val, isExpanded = true, filter = "") {
+      const el = document.createElement("div");
+      el.className = "ast-node";
+
+      const isObject = val !== null && typeof val === "object";
+      const isArray = Array.isArray(val);
+      const nodeType = isObject && val.node_type ? val.node_type : (isArray ? `[${val.length}]` : "");
+
+      const header = document.createElement("div");
+      header.className = "ast-node-header";
+
+      const toggle = document.createElement("span");
+      toggle.className = "ast-toggle";
+      toggle.textContent = isObject ? (isExpanded ? "▼" : "▶") : "•";
+      header.appendChild(toggle);
+
+      const label = document.createElement("span");
+      label.style.fontWeight = "600";
+      label.textContent = key + (nodeType ? `: ` : "");
+      header.appendChild(label);
+
+      if (nodeType) {
+        const badge = document.createElement("span");
+        badge.className = "ast-type-badge";
+        badge.textContent = nodeType;
+        header.appendChild(badge);
+      }
+
+      if (isObject && val.line) {
+        const lineBadge = document.createElement("span");
+        lineBadge.className = "ast-line-badge";
+        lineBadge.textContent = `L${val.line}`;
+        header.appendChild(lineBadge);
+      }
+
+      if (!isObject) {
+        const valPreview = document.createElement("span");
+        valPreview.className = "ast-prop-preview";
+        valPreview.textContent = JSON.stringify(val);
+        header.appendChild(valPreview);
+      }
+
+      el.appendChild(header);
+
+      if (isObject) {
+        const childrenContainer = document.createElement("div");
+        childrenContainer.style.display = isExpanded ? "block" : "none";
+
+        for (const childKey of Object.keys(val)) {
+          if (childKey === "node_type") continue;
+          const childEl = createAstNodeElement(childKey, val[childKey], false, filter);
+          childrenContainer.appendChild(childEl);
+        }
+
+        el.appendChild(childrenContainer);
+
+        header.addEventListener("click", () => {
+          const isCurrentlyHidden = childrenContainer.style.display === "none";
+          childrenContainer.style.display = isCurrentlyHidden ? "block" : "none";
+          toggle.textContent = isCurrentlyHidden ? "▼" : "▶";
+        });
+      }
+
+      return el;
+    }
+
+    // --- Scope Variables Table ---
+    function updateScopeTable(variables) {
+      currentScopeVariables = variables || [];
+      scopeCountBadge.textContent = currentScopeVariables.length;
+      scopeMetaText.textContent = `${currentScopeVariables.length} variable(s) tracked`;
+
+      if (currentScopeVariables.length === 0) {
+        scopeTbody.innerHTML = `<tr><td colspan="3" style="text-align: center; color: var(--text-dim); padding: 30px 0;">No variables in scope.</td></tr>`;
+        return;
+      }
+
+      renderScopeRows(currentScopeVariables);
+    }
+
+    function renderScopeRows(vars) {
+      scopeTbody.innerHTML = vars.map(v => {
+        let typeClass = "type-other";
+        const tLower = (v.type || "").toLowerCase();
+        if (tLower.includes("number") || tLower === "int" || tLower === "float") typeClass = "type-number";
+        else if (tLower.includes("text") || tLower === "str") typeClass = "type-text";
+        else if (tLower.includes("bool")) typeClass = "type-boolean";
+        else if (tLower.includes("list")) typeClass = "type-list";
+        else if (tLower.includes("record")) typeClass = "type-record";
+
+        const formattedVal = typeof v.value === "object" ? JSON.stringify(v.value) : escapeHtml(String(v.value));
+
+        return `
+          <tr>
+            <td style="font-weight: 700; color: var(--accent-cyan);">${escapeHtml(v.name)}</td>
+            <td><span class="type-pill ${typeClass}">${escapeHtml(v.type || "Any")}</span></td>
+            <td style="color: var(--text-main); max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(String(v.value))}">${formattedVal}</td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    // --- Stdlib Cards Grid ---
+    function renderStdlibCards(filterMod = "all", filterText = "") {
+      stdlibGrid.innerHTML = "";
+      const textQuery = filterText.toLowerCase().trim();
+
+      stdlibData.forEach(mod => {
+        if (filterMod !== "all" && mod.name !== filterMod) return;
+
+        mod.members.forEach(fn => {
+          if (textQuery && !fn.name.toLowerCase().includes(textQuery) && !fn.doc.toLowerCase().includes(textQuery)) {
+            return;
+          }
+
+          const card = document.createElement("div");
+          card.className = "fn-card";
+          card.innerHTML = `
+            <div>
+              <div class="fn-header">
+                <span class="fn-name">${escapeHtml(fn.name)}</span>
+                <span class="fn-mod">${escapeHtml(mod.name)}</span>
+              </div>
+              <div class="fn-sig">${escapeHtml(fn.signature)}</div>
+              <div class="fn-doc">${escapeHtml(fn.doc)}</div>
+            </div>
+            <div class="fn-actions">
+              <button class="btn-insert" data-mod="${mod.name}" data-fn="${fn.name}" data-sig="${fn.signature}">+ Insert into Code</button>
+            </div>
+          `;
+          stdlibGrid.appendChild(card);
+        });
+      });
+
+      // Hook insert buttons
+      document.querySelectorAll(".btn-insert").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const modName = btn.getAttribute("data-mod");
+          const fnName = btn.getAttribute("data-fn");
+          insertStdlibCall(modName, fnName);
+        });
+      });
+    }
+
+    function insertStdlibCall(modName, fnName) {
+      let code = codeInput.value;
+      const useStmt = `use ${modName}`;
+
+      // Insert 'use <module>' at top if not present
+      if (!code.includes(useStmt)) {
+        code = `${useStmt}\n` + code;
+      }
+
+      // Insert call snippet at cursor
+      const snippet = `\nlet res be call ${modName}.${fnName} with ...\n`;
+      const curPos = codeInput.selectionStart || code.length;
+      codeInput.value = code.slice(0, curPos) + snippet + code.slice(curPos);
+      updateEditor();
+      showToast(`Inserted '${modName}.${fnName}' into editor!`);
+    }
+
+    // --- Diagnostics & Gutter Errors ---
+    function highlightGutterError(line) {
+      const lineEl = document.querySelector(`.gutter-line[data-line="${line}"]`);
+      if (lineEl) lineEl.classList.add("has-error");
+    }
+
+    function clearGutterErrors() {
+      document.querySelectorAll(".gutter-line.has-error").forEach(el => el.classList.remove("has-error"));
+    }
+
+    function showDiagnostic(line, msg, hint) {
+      diagnosticMsg.textContent = `Line ${line}: ${msg}${hint ? ` (Hint: ${hint})` : ""}`;
+      diagnosticBar.classList.add("active");
+    }
+
+    document.getElementById("btn-dismiss-diag").addEventListener("click", () => {
+      diagnosticBar.classList.remove("active");
+    });
+
+    // --- Preset Examples Loader ---
+    async function loadExamplesCatalog() {
+      try {
+        const res = await fetch("/examples");
+        const data = await res.json();
+        if (data.ok && data.examples) {
+          catalogExamples = data.examples;
+          exampleSelect.innerHTML = `<option value="" disabled selected>Select an Example...</option>` +
+            catalogExamples.map(ex => `<option value="${ex.id}">[${ex.category}] ${ex.title}</option>`).join("");
+        }
+      } catch (err) {
+        exampleSelect.innerHTML = `<option value="">Examples Catalog</option>`;
+      }
+    }
+
+    exampleSelect.addEventListener("change", (e) => {
+      const selectedId = e.target.value;
+      const found = catalogExamples.find(ex => ex.id === selectedId);
+      if (found) {
+        codeInput.value = found.source;
+        updateEditor();
+        showToast(`Loaded "${found.title}"`);
+        checkProgram();
+      }
+    });
+
+    // --- Stdlib Catalog Loader ---
+    async function loadStdlibCatalog() {
+      try {
+        const res = await fetch("/stdlib");
+        const data = await res.json();
+        if (data.ok && data.modules) {
+          stdlibData = data.modules;
+          renderStdlibCards();
+        }
+      } catch (err) {
+        // Fallback
+      }
+    }
+
+    // Module pills filter
+    document.querySelectorAll(".mod-pill").forEach(pill => {
+      pill.addEventListener("click", () => {
+        document.querySelectorAll(".mod-pill").forEach(p => p.classList.remove("active"));
+        pill.classList.add("active");
+        renderStdlibCards(pill.getAttribute("data-mod"), document.getElementById("stdlib-search").value);
+      });
+    });
+
+    document.getElementById("stdlib-search").addEventListener("input", (e) => {
+      const activeMod = document.querySelector(".mod-pill.active").getAttribute("data-mod");
+      renderStdlibCards(activeMod, e.target.value);
+    });
+
+    // Scope search
+    document.getElementById("scope-search").addEventListener("input", (e) => {
+      const q = e.target.value.toLowerCase().trim();
+      const filtered = currentScopeVariables.filter(v =>
+        v.name.toLowerCase().includes(q) || (v.type && v.type.toLowerCase().includes(q))
+      );
+      renderScopeRows(filtered);
+    });
+
+    // AST Search
+    document.getElementById("ast-filter").addEventListener("input", (e) => {
+      if (currentAstJson) {
+        renderAstTree(currentAstJson, e.target.value);
+      }
+    });
+
+    document.getElementById("ast-expand-all").addEventListener("click", () => {
+      document.querySelectorAll("#ast-container .ast-node > div:nth-child(2)").forEach(el => el.style.display = "block");
+      document.querySelectorAll("#ast-container .ast-toggle").forEach(t => t.textContent = "▼");
+    });
+
+    document.getElementById("ast-collapse-all").addEventListener("click", () => {
+      document.querySelectorAll("#ast-container .ast-node > div:nth-child(2)").forEach(el => el.style.display = "none");
+      document.querySelectorAll("#ast-container .ast-toggle").forEach(t => t.textContent = "▶");
+    });
+
+    document.getElementById("ast-copy-json").addEventListener("click", () => {
+      if (currentAstJson) {
+        navigator.clipboard.writeText(JSON.stringify(currentAstJson, null, 2));
+        showToast("AST JSON copied to clipboard!");
+      }
+    });
+
+    // --- Strict Types Toggle ---
+    strictTypesToggle.addEventListener("click", () => {
+      strictTypesEnabled = !strictTypesEnabled;
+      strictTypesToggle.classList.toggle("active", strictTypesEnabled);
+      strictTypesToggle.querySelector("span").textContent = `Strict Types: ${strictTypesEnabled ? "ON" : "OFF"}`;
+      showToast(`Strict Type checking ${strictTypesEnabled ? "enabled" : "disabled"}`);
+      checkProgram();
+    });
+
+    // --- Theme Switcher ---
+    themeSelect.addEventListener("change", (e) => {
+      const theme = e.target.value;
+      document.documentElement.setAttribute("data-theme", theme);
+      localStorage.setItem("tpp_theme", theme);
+      showToast(`Switched theme to ${theme}`);
+    });
+
+    // --- Action Buttons ---
+    document.getElementById("btn-run").addEventListener("click", runProgram);
+    document.getElementById("btn-check").addEventListener("click", checkProgram);
+    document.getElementById("btn-fmt").addEventListener("click", formatProgram);
+
+    document.getElementById("btn-clear").addEventListener("click", () => {
+      terminalOutput.textContent = "Console cleared.";
+      termStatus.textContent = "Idle";
+      termStatus.className = "badge-pill";
+      termDuration.style.display = "none";
+      clearGutterErrors();
+      diagnosticBar.classList.remove("active");
+      showToast("Output console cleared");
+    });
+
+    document.getElementById("btn-copy-term").addEventListener("click", () => {
+      navigator.clipboard.writeText(terminalOutput.textContent);
+      showToast("Terminal text copied to clipboard!");
+    });
+
+    // --- Share / Copy Link ---
+    document.getElementById("btn-share").addEventListener("click", () => {
+      try {
+        const code = codeInput.value;
+        const encoded = btoa(encodeURIComponent(code));
+        const hash = `#code=${encoded}&mode=${execMode.value}&parser=${parserMode.value}&strict=${strictTypesEnabled ? "1" : "0"}`;
+        const shareUrl = window.location.origin + window.location.pathname + hash;
+        window.history.replaceState(null, "", hash);
+        navigator.clipboard.writeText(shareUrl);
+        showToast("🔗 Sharable link copied to clipboard!");
+      } catch (err) {
+        showToast("Failed generating share link");
+      }
+    });
+
+    // --- Download .tpp File ---
+    function downloadTppFile() {
+      const blob = new Blob([codeInput.value], { type: "text/plain;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "script.tpp";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast("Downloaded script.tpp");
+    }
+    document.getElementById("btn-download").addEventListener("click", downloadTppFile);
+
+    // --- Shortcuts Modal ---
+    const shortcutsModal = document.getElementById("shortcuts-modal");
+    document.getElementById("btn-shortcuts").addEventListener("click", () => {
+      shortcutsModal.classList.add("active");
+    });
+    document.getElementById("modal-close-btn").addEventListener("click", () => {
+      shortcutsModal.classList.remove("active");
+    });
+    shortcutsModal.addEventListener("click", (e) => {
+      if (e.target === shortcutsModal) shortcutsModal.classList.remove("active");
+    });
+
+    // --- URL Hash Restore ---
+    function restoreFromHash() {
+      const hash = window.location.hash.slice(1);
+      if (!hash) return false;
+      const params = new URLSearchParams(hash);
+      const encodedCode = params.get("code");
+      if (encodedCode) {
+        try {
+          const decoded = decodeURIComponent(atob(encodedCode));
+          codeInput.value = decoded;
+          if (params.get("mode")) execMode.value = params.get("mode");
+          if (params.get("parser")) parserMode.value = params.get("parser");
+          if (params.get("strict") === "1") {
+            strictTypesEnabled = true;
+            strictTypesToggle.classList.add("active");
+            strictTypesToggle.querySelector("span").textContent = "Strict Types: ON";
+          }
+          return true;
+        } catch (err) {
+          return false;
+        }
+      }
+      return false;
+    }
+
+    // --- Initialization ---
+    window.addEventListener("DOMContentLoaded", async () => {
+      // Saved Theme
+      const savedTheme = localStorage.getItem("tpp_theme");
+      if (savedTheme) {
+        document.documentElement.setAttribute("data-theme", savedTheme);
+        themeSelect.value = savedTheme;
+      }
+
+      // Default sample if no hash
+      const restored = restoreFromHash();
+      if (!restored) {
+        codeInput.value = `# Welcome to the T++ Modern Web Playground!
+# Natural syntax, expressive types, built-in standard library & testing.
+
+let greeting be "Hello from T++!"
+say greeting
+
+let price be 49.99
+let tax_rate be 0.08
+let total be price plus (price times tax_rate)
+
+say "Base price:" then price
+say "Total with 8% tax:" then total
+
+say "--- Counting from 1 to 5 ---"
+count from 1 to 5 as i:
+    say "Step" then i
+
+say "Ready! Explore presets from the dropdown above or press 'Run Code' (Ctrl+Enter)."`;
+      }
+
+      updateEditor();
+      await loadExamplesCatalog();
+      await loadStdlibCatalog();
+
+      // Initial AST check
+      fetchAst();
     });
   </script>
 </body>

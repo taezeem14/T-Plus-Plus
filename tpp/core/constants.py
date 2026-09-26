@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-VERSION = "3.2.0"
+VERSION = "3.2.1"
 
 ALLOWED_PYTHON_MODULES = {
     "math",
@@ -17,8 +17,12 @@ ALLOWED_PYTHON_MODULES = {
 NATIVE_STDLIB_MODULES = {
     "math",
     "text",
+    "crypto",
+    "collections",
     "system",
     "time",
+    "json",
+    "validate",
 }
 
 SAFE_GLOBAL_NAMES = {

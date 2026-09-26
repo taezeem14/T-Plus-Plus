@@ -241,6 +241,11 @@ class UserRaisedSignal(Exception):
         self.error_instance = error_instance
         self.line = line
 
+    def __str__(self) -> str:
+        loc = f"Line {self.line}: " if self.line is not None else ""
+        return f"{loc}Uncaught error: {self.error_instance}"
+
+
 
 def format_diagnostic(diagnostic: Diagnostic, *, color: bool = True) -> str:
     return diagnostic.render(color=color)

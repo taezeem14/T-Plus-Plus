@@ -10,6 +10,8 @@ from tpp.core.errors import (
     KeyNotFoundTppError,
     MathTppError,
     RuntimeTppError,
+    SecurityTppError,
+    TypeTppError,
 )
 from tpp.parser.lexer import ExpressionTokenizer
 from tpp.runtime.environment import Scope
@@ -42,6 +44,7 @@ class ExpressionEvaluator:
         ast.Sub,
         ast.Mult,
         ast.Div,
+        ast.FloorDiv,
         ast.Mod,
         ast.Pow,
         ast.And,
@@ -67,6 +70,10 @@ class ExpressionEvaluator:
         self._ast_cache: dict[str, ast.Expression] = {}
 
     def _interpolate_string(self, text: str, scope: Scope, line: int) -> str:
+        SENTINEL_L = "\x00_TPP_LBRACE_\x00"
+        SENTINEL_R = "\x00_TPP_RBRACE_\x00"
+        work = text.replace("{{", SENTINEL_L).replace("}}", SENTINEL_R)
+
         def _repl(match: re.Match[str]) -> str:
             inner = match.group(1).strip()
             try:
@@ -75,7 +82,8 @@ class ExpressionEvaluator:
             except Exception:
                 return match.group(0)
 
-        return re.sub(r"\{([^{}]+)\}", _repl, text)
+        res = re.sub(r"\{([^{}]+)\}", _repl, work)
+        return res.replace(SENTINEL_L, "{").replace(SENTINEL_R, "}")
 
     def evaluate(self, expr: str, scope: Scope, line: int) -> Any:
         text = expr.strip()
@@ -141,12 +149,16 @@ class ExpressionEvaluator:
                     return left * right
                 if isinstance(node.op, ast.Div):
                     return left / right
+                if isinstance(node.op, ast.FloorDiv):
+                    return left // right
                 if isinstance(node.op, ast.Mod):
                     return left % right
                 if isinstance(node.op, ast.Pow):
                     return left**right
             except ZeroDivisionError:
                 raise MathTppError("Cannot divide by zero.", line)
+            except (OverflowError, ValueError) as exc:
+                raise MathTppError(f"Math calculation error: {exc}", line)
             except TypeError as e:
                 raise RuntimeTppError(f"Cannot perform operation between {type(left).__name__} and {type(right).__name__}: {e}", line)
             raise RuntimeTppError("Unsupported binary operation.", line)
@@ -182,33 +194,42 @@ class ExpressionEvaluator:
             left = self._eval_node(node.left, scope, line)
             for op, comparator in zip(node.ops, node.comparators):
                 right = self._eval_node(comparator, scope, line)
-                if isinstance(op, ast.Eq):
-                    ok = left == right
-                elif isinstance(op, ast.NotEq):
-                    ok = left != right
-                elif isinstance(op, ast.Lt):
-                    ok = left < right
-                elif isinstance(op, ast.LtE):
-                    ok = left <= right
-                elif isinstance(op, ast.Gt):
-                    ok = left > right
-                elif isinstance(op, ast.GtE):
-                    ok = left >= right
-                elif isinstance(op, ast.In):
-                    ok = left in right
-                elif isinstance(op, ast.NotIn):
-                    ok = left not in right
-                else:
-                    raise RuntimeTppError("Unsupported comparison operation.", line)
+                try:
+                    if isinstance(op, ast.Eq):
+                        ok = left == right
+                    elif isinstance(op, ast.NotEq):
+                        ok = left != right
+                    elif isinstance(op, ast.Lt):
+                        ok = left < right
+                    elif isinstance(op, ast.LtE):
+                        ok = left <= right
+                    elif isinstance(op, ast.Gt):
+                        ok = left > right
+                    elif isinstance(op, ast.GtE):
+                        ok = left >= right
+                    elif isinstance(op, ast.In):
+                        ok = left in right
+                    elif isinstance(op, ast.NotIn):
+                        ok = left not in right
+                    else:
+                        raise RuntimeTppError("Unsupported comparison operation.", line)
+                except TypeError as exc:
+                    raise TypeTppError(f"Cannot compare {type(left).__name__} and {type(right).__name__}: {exc}", line)
                 if not ok:
                     return False
                 left = right
             return True
 
         if isinstance(node, ast.Attribute):
+            if node.attr.startswith("__"):
+                raise SecurityTppError(f"Access to private attribute '{node.attr}' is not permitted.", line)
             target = self._eval_node(node.value, scope, line)
-            if isinstance(target, dict) and node.attr in target:
-                return target[node.attr]
+            if isinstance(target, dict):
+                if node.attr in target:
+                    return target[node.attr]
+                if hasattr(target, node.attr):
+                    return getattr(target, node.attr)
+                raise KeyNotFoundTppError(f"Key '{node.attr}' not found in record/dictionary.", line)
             if hasattr(target, node.attr):
                 return getattr(target, node.attr)
             if hasattr(target, "fields") and node.attr in target.fields:

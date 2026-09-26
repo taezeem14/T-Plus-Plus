@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import base64
 import datetime
+import hashlib
 import json
 import math
 import os
 import random
 import re
+import statistics
 import time as pytime
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -107,6 +110,23 @@ def build_math_module() -> NativeModule:
             return float(s[mid])
         return (s[mid - 1] + s[mid]) / 2.0
 
+    def _variance(items: list[float]) -> float:
+        if not items or len(items) < 2:
+            return 0.0
+        try:
+            return float(statistics.variance(items))
+        except Exception:
+            m = sum(items) / len(items)
+            return float(sum((x - m) ** 2 for x in items) / (len(items) - 1))
+
+    def _stdev(items: list[float]) -> float:
+        if not items or len(items) < 2:
+            return 0.0
+        try:
+            return float(statistics.stdev(items))
+        except Exception:
+            return float(math.sqrt(_variance(items)))
+
     return NativeModule(
         "math",
         {
@@ -134,6 +154,12 @@ def build_math_module() -> NativeModule:
             "absolute_value": abs,
             "average": _average,
             "median": _median,
+            "variance": _variance,
+            "var": _variance,
+            "standard_deviation": _stdev,
+            "stdev": _stdev,
+            "std_dev": _stdev,
+            "clamp": lambda val, low, high: max(low, min(high, val)),
             "sum": sum,
             "sum_items": sum,
             "min": min,
@@ -145,6 +171,9 @@ def build_math_module() -> NativeModule:
             "is_prime": _is_prime,
             "random_number": lambda low=0.0, high=1.0: random.uniform(low, high),
             "random_integer": lambda low=1, high=100: random.randint(low, high),
+            "factorial": math.factorial,
+            "gcd": math.gcd,
+            "lcm": math.lcm,
             "pi": math.pi,
             "tau": math.tau,
             "e": math.e,
@@ -161,6 +190,20 @@ def build_text_module() -> NativeModule:
 
     def _format_number(amount: float, decimals: int = 2) -> str:
         return f"{amount:,.{decimals}f}"
+
+    def _b64_encode(s: Any) -> str:
+        data = str(s).encode("utf-8")
+        return base64.b64encode(data).decode("utf-8")
+
+    def _b64_decode(s: Any) -> str:
+        data = str(s).strip()
+        return base64.b64decode(data).decode("utf-8", errors="replace")
+
+    def _sha256(s: Any) -> str:
+        return hashlib.sha256(str(s).encode("utf-8")).hexdigest()
+
+    def _md5(s: Any) -> str:
+        return hashlib.md5(str(s).encode("utf-8")).hexdigest()
 
     return NativeModule(
         "text",
@@ -190,6 +233,43 @@ def build_text_module() -> NativeModule:
             "ends_with": lambda s, suffix: str(s).endswith(str(suffix)),
             "matches_pattern": lambda s, pattern: bool(re.search(str(pattern), str(s))),
             "words_in": lambda s: [w for w in re.split(r"\s+", str(s).strip()) if w],
+            "base64_encode": _b64_encode,
+            "base64_decode": _b64_decode,
+            "hash_sha256": _sha256,
+            "sha256": _sha256,
+            "hash_md5": _md5,
+            "md5": _md5,
+        },
+    )
+
+
+# ==========================================
+# 2B. CRYPTO MODULE
+# ==========================================
+def build_crypto_module() -> NativeModule:
+    def _b64_encode(s: Any) -> str:
+        data = str(s).encode("utf-8")
+        return base64.b64encode(data).decode("utf-8")
+
+    def _b64_decode(s: Any) -> str:
+        data = str(s).strip()
+        return base64.b64decode(data).decode("utf-8", errors="replace")
+
+    def _sha256(s: Any) -> str:
+        return hashlib.sha256(str(s).encode("utf-8")).hexdigest()
+
+    def _md5(s: Any) -> str:
+        return hashlib.md5(str(s).encode("utf-8")).hexdigest()
+
+    return NativeModule(
+        "crypto",
+        {
+            "base64_encode": _b64_encode,
+            "base64_decode": _b64_decode,
+            "hash_sha256": _sha256,
+            "sha256": _sha256,
+            "hash_md5": _md5,
+            "md5": _md5,
         },
     )
 
@@ -233,6 +313,18 @@ def build_collections_module() -> NativeModule:
         s = max(1, int(size))
         return [items[i : i + s] for i in range(0, len(items), s)]
 
+    def _sample(items: list[Any], k: int = 1) -> list[Any]:
+        seq = list(items)
+        if not seq:
+            return []
+        count = max(0, min(int(k), len(seq)))
+        return random.sample(seq, count)
+
+    def _shuffle(items: list[Any]) -> list[Any]:
+        seq = list(items)
+        random.shuffle(seq)
+        return seq
+
     return NativeModule(
         "collections",
         {
@@ -250,6 +342,11 @@ def build_collections_module() -> NativeModule:
             "take_last": lambda items, n: items[-int(n) :] if int(n) > 0 else [],
             "unique_items": lambda items: list(dict.fromkeys(items)),
             "chunk_items": _chunk,
+            "sample": _sample,
+            "shuffle": _shuffle,
+            "first": lambda items: items[0] if items else None,
+            "last": lambda items: items[-1] if items else None,
+            "count_occurrences": lambda items, val: list(items).count(val),
         },
     )
 
@@ -392,6 +489,7 @@ def create_native_stdlib_registry(base_dir: Optional[Path] = None) -> dict[str, 
     return {
         "math": build_math_module(),
         "text": build_text_module(),
+        "crypto": build_crypto_module(),
         "collections": build_collections_module(),
         "system": build_system_module(effective_base),
         "time": build_time_module(),

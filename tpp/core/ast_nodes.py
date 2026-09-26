@@ -379,3 +379,24 @@ class MatchStmt:
     expr: str
     cases: list[MatchWhenClause]
     otherwise_body: Optional[list[Any]] = None
+
+
+def ast_to_dict(node: Any) -> Any:
+    """Recursively serializes AST nodes into JSON-serializable dictionaries."""
+    import dataclasses
+
+    if node is None:
+        return None
+    if isinstance(node, (int, float, str, bool)):
+        return node
+    if isinstance(node, (list, tuple)):
+        return [ast_to_dict(x) for x in node]
+    if isinstance(node, dict):
+        return {str(k): ast_to_dict(v) for k, v in node.items()}
+    if dataclasses.is_dataclass(node):
+        result = {"type": type(node).__name__}
+        for f in dataclasses.fields(node):
+            result[f.name] = ast_to_dict(getattr(node, f.name))
+        return result
+    return str(node)
+

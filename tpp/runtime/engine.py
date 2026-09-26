@@ -51,6 +51,7 @@ from tpp.core.ast_nodes import (
     UseFromModuleStmt,
     UseModuleStmt,
     WhileStmt,
+    ast_to_dict,
 )
 from tpp.core.constants import ALLOWED_PYTHON_MODULES, CORE_STATEMENT_STARTERS, VERSION
 from tpp.core.errors import (
@@ -63,13 +64,15 @@ from tpp.core.errors import (
     ReturnSignal,
     RuntimeTppError,
     SecurityTppError,
+    SemanticTppError,
+    SyntaxTppError,
     TppCallFrame,
     TppError,
     TypeTppError,
     UserRaisedSignal,
 )
 from tpp.core.modules import ModuleRecord, ModuleRegistry
-from tpp.core.types import check_type_or_raise
+from tpp.core.types import check_type_or_raise, is_value_compatible_with_type, parse_type_annotation
 from tpp.core.utils import is_identifier, split_key_value, split_natural_args, split_top_level, split_top_level_once
 from tpp.gui.framework import GuiRuntime
 from tpp.parser import Optimizer, Parser, ParserConfig, SemanticAnalyzer, SemanticConfig
@@ -79,6 +82,7 @@ from tpp.runtime.evaluator import ExpressionEvaluator
 from tpp.runtime.interop import SafePythonInterop
 from tpp.runtime.profiler import RuntimeProfiler
 from tpp.stdlib import NativeModule, create_native_stdlib_registry
+from tpp.tools.formatter import format_tpp_source
 
 
 @dataclass
@@ -287,6 +291,37 @@ class RuntimeEngine:
                 match_ok = False
                 if pat in {"_", "anything", "otherwise"}:
                     match_ok = True
+                elif pat.lower() in {"true", "false", "none", "nothing"}:
+                    pat_val = self.evaluate_expression(pat, scope, case.line)
+                    if pat_val == target_val:
+                        match_ok = True
+                elif pat in {"[]", "empty", "empty list"}:
+                    if isinstance(target_val, (list, tuple)) and len(target_val) == 0:
+                        match_ok = True
+                elif " as " in pat:
+                    var_part, type_part = pat.split(" as ", 1)
+                    var_name = var_part.strip()
+                    type_ann = parse_type_annotation(type_part.strip(), case.line)
+                    if is_identifier(var_name) and type_ann and is_value_compatible_with_type(target_val, type_ann):
+                        case_scope.define(var_name, target_val)
+                        match_ok = True
+                elif pat.lower().startswith("is a ") or pat.lower().startswith("is an ") or pat.lower().startswith("a ") or pat.lower().startswith("an "):
+                    clean_type = re.sub(r"^(?:is\s+)?(?:a|an)\s+", "", pat, flags=re.IGNORECASE).strip()
+                    type_ann = parse_type_annotation(clean_type, case.line)
+                    if type_ann and is_value_compatible_with_type(target_val, type_ann):
+                        match_ok = True
+                elif " or " in pat:
+                    for alt in [p.strip() for p in pat.split(" or ")]:
+                        if alt.lower() in {"true", "false", "none", "nothing"}:
+                            alt_val = self.evaluate_expression(alt, scope, case.line)
+                        else:
+                            try:
+                                alt_val = self.evaluate_expression(alt, scope, case.line)
+                            except Exception:
+                                alt_val = alt
+                        if alt_val == target_val:
+                            match_ok = True
+                            break
                 elif is_identifier(pat):
                     case_scope.define(pat, target_val)
                     match_ok = True
@@ -470,12 +505,21 @@ class RuntimeEngine:
 
         if isinstance(stmt, DictSetStmt):
             map_obj = scope.get(stmt.map_name, stmt.line)
-            if not isinstance(map_obj, dict):
-                raise RuntimeTppError(f"'{stmt.map_name}' is not a map.", stmt.line)
-            key = self.evaluate_expression(stmt.key_expr, scope, stmt.line)
+            try:
+                key = self.evaluate_expression(stmt.key_expr, scope, stmt.line)
+            except RuntimeTppError:
+                if is_identifier(stmt.key_expr):
+                    key = stmt.key_expr
+                else:
+                    raise
             value = self.evaluate_expression(stmt.value_expr, scope, stmt.line)
-            map_obj[key] = value
-            return
+            if isinstance(map_obj, dict):
+                map_obj[key] = value
+                return
+            if isinstance(map_obj, TppInstance):
+                map_obj.fields[str(key)] = value
+                return
+            raise RuntimeTppError(f"'{stmt.map_name}' is not a map or object instance.", stmt.line)
 
         if isinstance(stmt, ClassDefStmt):
             init_method: Optional[TppFunction] = None
@@ -599,8 +643,8 @@ class RuntimeEngine:
     def execute_try(self, stmt: TryStmt, scope: Scope, *, test_context: bool = False) -> None:
         try:
             self.execute_block(stmt.body, scope, test_context=test_context)
-        except ExecutionBudgetExceeded:
-            # Resource limit violations are not catchable by user scripts
+        except (ExecutionBudgetExceeded, ReturnSignal, BreakSignal, ContinueSignal):
+            # Resource limit violations and control-flow signals are not catchable by user scripts
             raise
         except Exception as exc:
             # Extract error information
@@ -985,7 +1029,10 @@ class RuntimeEngine:
 
             target_obj = self.evaluate_expression(target_expr, scope, line)
             method_target = self.resolve_member(target_obj, method_name, line)
-            args = [self.evaluate_expression(part, scope, line) for part in split_natural_args(args_text)]
+            if args_text.strip().lower() in {"no inputs", "nothing", ""}:
+                args = []
+            else:
+                args = [self.evaluate_expression(part, scope, line) for part in split_natural_args(args_text)]
             return self.invoke_target(method_target, args, line)
 
         with_split = split_top_level_once(call_text, " with ")
@@ -995,7 +1042,10 @@ class RuntimeEngine:
         else:
             target_expr, args_text = with_split
 
-        args = [self.evaluate_expression(part, scope, line) for part in split_natural_args(args_text)]
+        if args_text.strip().lower() in {"no inputs", "nothing", ""}:
+            args = []
+        else:
+            args = [self.evaluate_expression(part, scope, line) for part in split_natural_args(args_text)]
         return self.call_named_target(target_expr, args, scope, line)
 
     def call_named_target(self, target_expr: str, args: list[Any], scope: Scope, line: int) -> Any:
@@ -1160,3 +1210,77 @@ class RuntimeEngine:
             )
 
         return "define function task with no inputs:\n    do nothing"
+
+    def get_variables_scope(self) -> dict[str, Any]:
+        """Returns a JSON-serializable snapshot of user variables in the global scope."""
+        def _to_json_compat(val: Any) -> Any:
+            if val is None:
+                return None
+            if isinstance(val, (int, float, str, bool)):
+                return val
+            if isinstance(val, (list, tuple)):
+                return [_to_json_compat(x) for x in val]
+            if isinstance(val, dict):
+                return {str(k): _to_json_compat(v) for k, v in val.items()}
+            if isinstance(val, set):
+                return [_to_json_compat(x) for x in val]
+            if hasattr(val, "fields"):
+                return {str(k): _to_json_compat(v) for k, v in val.fields.items()}
+            if hasattr(val, "to_dict"):
+                return val.to_dict()
+            return repr(val)
+
+        return {k: _to_json_compat(v) for k, v in self.global_scope.values.items()}
+
+    def get_ast_json(self, source: str) -> dict[str, Any]:
+        """Parses source and returns its AST as a serializable dictionary."""
+        program = self.parse_source(source)
+        return ast_to_dict(program)
+
+    def check_diagnostics(self, source: str, file_path: Optional[str] = None) -> list[dict[str, Any]]:
+        """Parses and analyzes source with multi-error collection, returning diagnostics."""
+        rewrites, keywords = self.plugin_manager.snapshot_keywords()
+        parser = Parser(
+            source,
+            config=ParserConfig(mode=self.config.parser_mode, collect_multiple_errors=True),
+            plugin_rewrites=rewrites,
+            plugin_keywords=keywords,
+            file_path=file_path,
+        )
+        try:
+            program = parser.parse()
+        except SyntaxTppError as e:
+            parser.diagnostics.append(e.to_diagnostic())
+            program = Program(statements=[])
+
+        semantic = SemanticAnalyzer(
+            SemanticConfig(
+                strict_variable_resolution=self.config.strict_semantic_resolution,
+                strict_types=self.config.strict_types,
+            )
+        )
+        try:
+            semantic.analyze(program)
+        except SemanticTppError as e:
+            semantic.diagnostics.append(e.to_diagnostic())
+
+        all_diags = list(parser.diagnostics) + list(semantic.diagnostics)
+        return [
+            {
+                "message": d.message,
+                "severity": d.severity.value if hasattr(d.severity, "value") else str(d.severity),
+                "line": d.line,
+                "col": d.col,
+                "end_line": d.end_line,
+                "end_col": d.end_col,
+                "suggestion": d.suggestion,
+                "source_line": d.source_line,
+                "file_path": d.file_path,
+                "rendered": d.render(color=False),
+            }
+            for d in all_diags
+        ]
+
+    def format_code(self, source: str) -> str:
+        """Formats T++ code to standard style."""
+        return format_tpp_source(source)

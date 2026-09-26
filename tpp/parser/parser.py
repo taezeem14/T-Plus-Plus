@@ -90,13 +90,80 @@ class Parser:
 
         self.source = source
         self.file_path = file_path
-        self.lines: list[tuple[int, str]] = [
-            (index + 1, line.rstrip("\n")) for index, line in enumerate(source.splitlines())
-        ]
+        self.lines: list[tuple[int, str]] = self._build_logical_lines(source)
         self.plugin_rewrites = plugin_rewrites or {}
         self.plugin_keywords = plugin_keywords or set()
         self.diagnostics: list[Diagnostic] = []
         self._refresh_plugin_phrase_order()
+
+    @staticmethod
+    def _build_logical_lines(source: str) -> list[tuple[int, str]]:
+        raw_lines = source.splitlines()
+        logical: list[tuple[int, str]] = []
+        i = 0
+        n = len(raw_lines)
+
+        while i < n:
+            start_line_no = i + 1
+            line = raw_lines[i].rstrip("\r\n")
+            stripped = line.strip()
+
+            # Empty lines or standalone comments are preserved directly
+            if not stripped or stripped.startswith("#"):
+                logical.append((start_line_no, line))
+                i += 1
+                continue
+
+            bracket_depth = 0
+            curr_i = i
+
+            while True:
+                in_quote: Optional[str] = None
+                escaped = False
+                backslash_continuation = False
+
+                idx = 0
+                seg = raw_lines[curr_i].rstrip("\r\n")
+                while idx < len(seg):
+                    ch = seg[idx]
+                    if in_quote:
+                        if ch == in_quote and not escaped:
+                            in_quote = None
+                        elif ch == "\\" and not escaped:
+                            escaped = True
+                            idx += 1
+                            continue
+                        escaped = False
+                    else:
+                        if ch in ('"', "'"):
+                            in_quote = ch
+                        elif ch == "#":
+                            break
+                        elif ch in "([{":
+                            bracket_depth += 1
+                        elif ch in ")]}":
+                            bracket_depth = max(0, bracket_depth - 1)
+                    idx += 1
+
+                uncommented = seg[:idx].rstrip()
+                if uncommented.endswith("\\"):
+                    backslash_continuation = True
+                    uncommented = uncommented[:-1].rstrip()
+
+                if curr_i == i:
+                    accum = uncommented
+                else:
+                    accum = accum + " " + uncommented.strip()
+
+                if (bracket_depth > 0 or backslash_continuation) and curr_i + 1 < n:
+                    curr_i += 1
+                else:
+                    break
+
+            logical.append((start_line_no, accum))
+            i = curr_i + 1
+
+        return logical
 
     @property
     def fuzzy_mode(self) -> bool:
@@ -640,9 +707,57 @@ class Parser:
         if re.match(r"^change\s+([A-Za-z_][A-Za-z0-9_]*)\s+to\s*$", text, re.IGNORECASE):
             raise SyntaxTppError("I expected a value after 'change'.", line_no)
 
+        change_dot_match = re.match(r"^change\s+([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)\s+to\s+(.+)$", text, re.IGNORECASE)
+        if change_dot_match:
+            return (
+                DictSetStmt(
+                    line=line_no,
+                    key_expr=f'"{change_dot_match.group(2)}"',
+                    map_name=change_dot_match.group(1),
+                    value_expr=change_dot_match.group(3).strip(),
+                ),
+                index + 1,
+            )
+
+        change_subscript_match = re.match(r"^change\s+([A-Za-z_][A-Za-z0-9_]*)\[(.+?)\]\s+to\s+(.+)$", text, re.IGNORECASE)
+        if change_subscript_match:
+            return (
+                DictSetStmt(
+                    line=line_no,
+                    key_expr=change_subscript_match.group(2).strip(),
+                    map_name=change_subscript_match.group(1),
+                    value_expr=change_subscript_match.group(3).strip(),
+                ),
+                index + 1,
+            )
+
         change_match = re.match(r"^change\s+([A-Za-z_][A-Za-z0-9_]*)\s+to\s+(.+)$", text, re.IGNORECASE)
         if change_match:
             return ChangeStmt(line=line_no, name=change_match.group(1), expr=change_match.group(2).strip()), index + 1
+
+        dict_dot_match = re.match(r"^set\s+([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)\s+to\s+(.+)$", text, re.IGNORECASE)
+        if dict_dot_match:
+            return (
+                DictSetStmt(
+                    line=line_no,
+                    key_expr=f'"{dict_dot_match.group(2)}"',
+                    map_name=dict_dot_match.group(1),
+                    value_expr=dict_dot_match.group(3).strip(),
+                ),
+                index + 1,
+            )
+
+        dict_subscript_match = re.match(r"^set\s+([A-Za-z_][A-Za-z0-9_]*)\[(.+?)\]\s+to\s+(.+)$", text, re.IGNORECASE)
+        if dict_subscript_match:
+            return (
+                DictSetStmt(
+                    line=line_no,
+                    key_expr=dict_subscript_match.group(2).strip(),
+                    map_name=dict_subscript_match.group(1),
+                    value_expr=dict_subscript_match.group(3).strip(),
+                ),
+                index + 1,
+            )
 
         dict_set_match = re.match(r"^set\s+the\s+(.+)\s+of\s+([A-Za-z_][A-Za-z0-9_]*)\s+to\s+(.+)$", text, re.IGNORECASE)
         if dict_set_match:

@@ -19,9 +19,15 @@ class ExpressionTokenizer:
 
     PHRASE_OPS: list[tuple[tuple[str, ...], str]] = [
         (("to", "the", "power", "of"), "**"),
+        (("raised", "to", "the", "power", "of"), "**"),
+        (("raised", "to"), "**"),
+        (("multiplied", "by"), "*"),
         (("divided", "by"), "/"),
         (("is", "greater", "than", "or", "equal", "to"), ">="),
         (("is", "less", "than", "or", "equal", "to"), "<="),
+        (("is", "the", "same", "as"), "=="),
+        (("is", "different", "from"), "!="),
+        (("does", "not", "equal"), "!="),
         (("is", "greater", "than"), ">"),
         (("is", "less", "than"), "<"),
         (("is", "at", "least"), ">="),
@@ -46,6 +52,7 @@ class ExpressionTokenizer:
         "minus": "-",
         "times": "*",
         "modulo": "%",
+        "mod": "%",
         "and": "and",
         "or": "or",
         "not": "not",
@@ -65,19 +72,40 @@ class ExpressionTokenizer:
         self.stats = LexerStats()
 
     def preprocess_natural_sugar(self, text: str) -> str:
-        """Preprocesses natural possessive phrases (person's name -> person.name) and between."""
+        """Preprocesses natural possessive phrases (person's name -> person.name) and between,
+        ensuring string literals are protected from accidental mutation."""
+        # Protect string literals from being rewritten
+        string_placeholders: list[str] = []
+
+        def _mask_string(match: re.Match[str]) -> str:
+            idx = len(string_placeholders)
+            string_placeholders.append(match.group(0))
+            return f"\x00TPPSTR{idx}\x00"
+
+        # Mask string literals in a single regex pass
+        masked = re.sub(r'("(?:\\.|[^"\\])*"|(?<![A-Za-z0-9_\)\]])\'(?:\\.|[^\'\\])*\')', _mask_string, text)
+
         # 1. Possessive sugar: 'person's name' or "item's is_done" -> 'person.name'
         # Handle 's identifier
-        processed = re.sub(r"([A-Za-z0-9_\)\]])'s\s+([A-Za-z_][A-Za-z0-9_]*)", r"\1.\2", text)
+        processed = re.sub(r"([A-Za-z0-9_\)\]\x00])'s\s+([A-Za-z_][A-Za-z0-9_]*)", r"\1.\2", masked)
 
-        # 2. Desugar 'X is between Y and Z' -> '(Y <= X <= Z)'
-        between_match = re.search(r"([A-Za-z0-9_\.\(\)]+)\s+is\s+between\s+(.+?)\s+and\s+([A-Za-z0-9_\.\(\)]+)", processed)
-        if between_match:
+        # 2. Desugar 'X is between Y and Z' -> '(Y <= X <= Z)' for all occurrences
+        while True:
+            between_match = re.search(
+                r"([A-Za-z0-9_\.\(\)\[\]\x00]+)\s+is\s+between\s+(.+?)\s+and\s+([A-Za-z0-9_\.\(\)\[\]\x00]+)",
+                processed,
+            )
+            if not between_match:
+                break
             var_part = between_match.group(1).strip()
             low_part = between_match.group(2).strip()
             high_part = between_match.group(3).strip()
             repl = f"({low_part} <= {var_part} <= {high_part})"
             processed = processed[:between_match.start()] + repl + processed[between_match.end():]
+
+        # Restore string literals in reverse order
+        for idx in range(len(string_placeholders) - 1, -1, -1):
+            processed = processed.replace(f"\x00TPPSTR{idx}\x00", string_placeholders[idx])
 
         return processed
 

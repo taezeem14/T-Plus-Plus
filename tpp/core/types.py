@@ -35,9 +35,21 @@ def parse_type_annotation(text: str, line: int = 1) -> Optional[TypeAnnotation |
     if not cleaned:
         return None
 
-    # Check for 'or' union (e.g. 'a number or nothing', 'text or a number')
-    if " or " in cleaned:
-        parts = [p.strip() for p in cleaned.split(" or ")]
+    # Support 'optional <type>'
+    if cleaned.lower().startswith("optional "):
+        inner = parse_type_annotation(cleaned[9:], line)
+        if isinstance(inner, TypeAnnotation):
+            inner.is_optional = True
+            return inner
+        if isinstance(inner, UnionTypeAnnotation):
+            nothing_ann = TypeAnnotation(line=line, name="nothing")
+            if not any(t.name == "nothing" for t in inner.types):
+                inner.types.append(nothing_ann)
+            return inner
+
+    # Check for union with ' or ' or '|' (e.g. 'a number or nothing', 'text | a number')
+    if " or " in cleaned or "|" in cleaned:
+        parts = [p.strip() for p in re.split(r"\s+or\s+|\s*\|\s*", cleaned) if p.strip()]
         parsed_types: list[TypeAnnotation] = []
         for part in parts:
             ann = parse_type_annotation(part, line)
@@ -47,7 +59,8 @@ def parse_type_annotation(text: str, line: int = 1) -> Optional[TypeAnnotation |
                 parsed_types.extend(ann.types)
         if len(parsed_types) == 1:
             return parsed_types[0]
-        return UnionTypeAnnotation(line=line, types=parsed_types)
+        if parsed_types:
+            return UnionTypeAnnotation(line=line, types=parsed_types)
 
     # Function type: 'a function that takes <types> and gives back <type>'
     fn_match = re.match(r"^a\s+function\s+that\s+takes\s+(.+?)\s+and\s+gives\s+back\s+(.+)$", cleaned, re.IGNORECASE)
@@ -77,22 +90,28 @@ def parse_type_annotation(text: str, line: int = 1) -> Optional[TypeAnnotation |
     if lowered.startswith("a ") or lowered.startswith("an "):
         lowered = lowered.split(" ", 1)[1]
 
-    if lowered in {"number", "num", "float"}:
+    if lowered in {"number", "num", "float", "numbers", "floats"}:
         return TypeAnnotation(line=line, name="number")
-    if lowered in {"whole number", "int", "integer"}:
+    if lowered in {"whole number", "int", "integer", "whole numbers", "ints", "integers"}:
         return TypeAnnotation(line=line, name="whole number")
-    if lowered in {"text", "str", "string"}:
+    if lowered in {"text", "str", "string", "texts", "strings"}:
         return TypeAnnotation(line=line, name="text")
-    if lowered in {"boolean", "bool"}:
+    if lowered in {"boolean", "bool", "booleans", "bools"}:
         return TypeAnnotation(line=line, name="boolean")
     if lowered in {"nothing", "none"}:
         return TypeAnnotation(line=line, name="nothing")
-    if lowered in {"list", "array"}:
+    if lowered in {"list", "array", "lists", "arrays"}:
         return TypeAnnotation(line=line, name="list")
-    if lowered in {"record", "map", "dict"}:
+    if lowered in {"record", "map", "dict", "dictionary", "records", "maps", "dicts", "dictionaries"}:
         return TypeAnnotation(line=line, name="record")
-    if lowered in {"function", "fn"}:
+    if lowered in {"set", "sets"}:
+        return TypeAnnotation(line=line, name="set")
+    if lowered in {"tuple", "tuples"}:
+        return TypeAnnotation(line=line, name="tuple")
+    if lowered in {"function", "fn", "functions"}:
         return TypeAnnotation(line=line, name="function")
+    if lowered in {"any", "anything"}:
+        return TypeAnnotation(line=line, name="any")
 
     # Custom type / record name
     return TypeAnnotation(line=line, name=cleaned.strip())
@@ -107,6 +126,9 @@ def is_value_compatible_with_type(val: Any, type_ann: TypeAnnotation | UnionType
         return True
 
     name = type_ann.name
+
+    if name in {"any", "anything"}:
+        return True
 
     # Check 'nothing'
     if val is None or isinstance(val, TppNothing):
@@ -138,6 +160,14 @@ def is_value_compatible_with_type(val: Any, type_ann: TypeAnnotation | UnionType
         if type_ann.element_type:
             return all(is_value_compatible_with_type(item, type_ann.element_type) for item in val)
         return True
+
+    # 'set'
+    if name == "set":
+        return isinstance(val, set)
+
+    # 'tuple'
+    if name == "tuple":
+        return isinstance(val, tuple)
 
     # 'record'
     if name == "record":
